@@ -1,4 +1,4 @@
-/* ------------------------------------------------------------------------- *
+/* ------------------------------------------------------------------------- *\
  * NFL Scoreboard — client app.
  * Data source: ESPN's public NFL API (CORS-enabled, no key required):
  *   - scoreboard: site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard
@@ -58,6 +58,9 @@
   const state = {
     date: new Date(),      // selected day (local time)
     events: [],            // summarized events for the selected day
+    weeks: [],             // flattened league calendar [{label, start, end}]
+    phases: [],            // league calendar phases [{label, start, end}]
+    seasonName: '',        // e.g. "Preseason", "Regular Season", "Postseason"
     eventIndex: -1,        // open game within state.events
     summary: null,         // raw summary JSON for the open game
     activeTab: 'plays',
@@ -73,11 +76,21 @@
     });
   }
 
+  /* -------------------------------- dates -------------------------------- */
+
   function toYMD(d) {
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return '' + y + m + day;
+  }
+
+  function fromYMD(ymd) {
+    return new Date(
+      Number(ymd.slice(0, 4)),
+      Number(ymd.slice(4, 6)) - 1,
+      Number(ymd.slice(6, 8))
+    );
   }
 
   function addDays(d, n) {
@@ -90,6 +103,10 @@
     return d.toLocaleDateString(undefined, {
       weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
     });
+  }
+
+  function fmtChipLabel(d) {
+    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
   }
 
   function localTime(iso) {
@@ -129,12 +146,71 @@
     return { cls: 'pre', text: localTime(ev.date) || 'Scheduled', sub: '' };
   }
 
+  /* ------------------------- league calendar / week ---------------------- */
+
+  function parseCalendar(data) {
+    state.weeks = [];
+    state.phases = [];
+    state.seasonName = '';
+    const league = (data && data.leagues && data.leagues[0]) || null;
+    if (!league) return;
+    if (league.season && league.season.type) state.seasonName = league.season.type.name || '';
+    (league.calendar || []).forEach(function (phase) {
+      state.phases.push({
+        label: phase.label || '',
+        start: new Date(phase.startDate),
+        end: new Date(phase.endDate)
+      });
+      (phase.entries || []).forEach(function (e) {
+        state.weeks.push({
+          label: e.label || '',
+          start: new Date(e.startDate),
+          end: new Date(e.endDate)
+        });
+      });
+    });
+  }
+
+  function weekLabelFor(d) {
+    const probe = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12);
+    let i;
+    for (i = 0; i < state.weeks.length; i++) {
+      if (probe >= state.weeks[i].start && probe <= state.weeks[i].end) {
+        return state.weeks[i].label;
+      }
+    }
+    for (i = 0; i < state.phases.length; i++) {
+      if (probe >= state.phases[i].start && probe <= state.phases[i].end) {
+        return state.phases[i].label;
+      }
+    }
+    const ev = state.events[0];
+    if (ev && ev.week != null) return (state.seasonName || 'NFL') + ' · Week ' + ev.week;
+    return '';
+  }
+
+  function updateWeekLabel() {
+    const label = weekLabelFor(state.date);
+    const el = $('week-label');
+    el.textContent = label;
+    el.classList.toggle('hidden', !label);
+  }
+
   /* ------------------------------ scoreboard ----------------------------- */
 
+  function fetchScoreboard(d) {
+    return fetch(SCOREBOARD_URL + '?dates=' + encodeURIComponent(toYMD(d || state.date)))
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      });
+  }
+
   function loadScoreboard() {
-    $('scoreboard-view').innerHTML = '<div class="loading">Loading scores…</div>';
+    $('scoreboard-view').innerHTML = skeletonHTML();
     fetchScoreboard()
       .then(function (data) {
+        parseCalendar(data);
         state.events = (data.events || []).map(NFLMap.summarizeEvent).filter(Boolean);
         renderScoreboard();
         updateLiveIndicator();
@@ -149,6 +225,7 @@
   function refreshScoreboard() {
     fetchScoreboard()
       .then(function (data) {
+        parseCalendar(data);
         const events = (data.events || []).map(NFLMap.summarizeEvent).filter(Boolean);
         const prevOpen = current();
         state.events = events;
@@ -156,35 +233,43 @@
           state.eventIndex = state.events.findIndex(function (e) { return e.id === prevOpen.id; });
         }
         renderScoreboard();
+        updateWeekLabel();
         updateLiveIndicator();
         if (state.eventIndex >= 0) renderGameHeader();
       })
       .catch(function () { /* keep last good data on transient failure */ });
   }
 
-  function fetchScoreboard() {
-    return fetch(SCOREBOARD_URL + '?dates=' + encodeURIComponent(toYMD(state.date)))
-      .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      });
+  function skeletonHTML() {
+    let cards = '';
+    for (let i = 0; i < 3; i++) {
+      cards += '<div class="game-card skeleton" aria-hidden="true">' +
+        '<div class="sk" style="width:42%"></div>' +
+        '<div class="sk" style="width:88%"></div>' +
+        '<div class="sk" style="width:88%"></div>' +
+      '</div>';
+    }
+    return '<div class="cards">' + cards + '</div>';
   }
 
   function renderScoreboard() {
     const evs = state.events;
-    const live = evs.filter(function (e) { return e.status.state === 'in'; });
-    const done = evs.filter(function (e) { return e.status.state === 'post'; });
-    const pre = evs.filter(function (e) { return e.status.state === 'pre'; });
+    updateWeekLabel();
 
     let html = '';
     if (!evs.length) {
-      html = '<div class="empty">No games scheduled for ' + esc(fmtDateLabel(state.date)) + '.</div>';
+      html = emptyDayHTML();
     } else {
+      const live = evs.filter(function (e) { return e.status.state === 'in'; });
+      const done = evs.filter(function (e) { return e.status.state === 'post'; });
+      const pre = evs.filter(function (e) { return e.status.state === 'pre'; });
       html += groupHTML('In Progress', live);
       html += groupHTML('Final', done);
       html += groupHTML('Upcoming', pre);
     }
     $('scoreboard-view').innerHTML = html;
+
+    if (!evs.length) findNearbyGameDays(state.date);
   }
 
   function groupHTML(title, list) {
@@ -199,8 +284,11 @@
     if (!away || !home) return '';
     const sub = st.sub ? ' <span class="st-sub">' + esc(st.sub) + '</span>' : '';
     const bcast = ev.broadcast ? '<span class="card-bcast">' + esc(ev.broadcast) + '</span>' : '';
+    const aria = esc(away.abbr) + ' at ' + esc(home.abbr) + ', ' + esc(st.text) +
+      (away.score !== '' && home.score !== '' ? ', ' + esc(away.score) + ' to ' + esc(home.score) : '') +
+      '. Open game details.';
     return '' +
-      '<article class="game-card" data-id="' + esc(ev.id) + '">' +
+      '<article class="game-card" data-id="' + esc(ev.id) + '" tabindex="0" role="button" aria-label="' + aria + '">' +
         '<div class="card-top">' +
           '<span class="badge ' + st.cls + '">' + esc(st.text) + sub + '</span>' + bcast +
         '</div>' +
@@ -220,6 +308,50 @@
         '</div>' +
         '<div class="team-score">' + esc(t.score) + '</div>' +
       '</div>';
+  }
+
+  /* ------------------------- empty days & nearby games ------------------- */
+
+  function emptyDayHTML() {
+    return '<div class="empty">' +
+      '<div class="empty-title">No games on ' + esc(fmtDateLabel(state.date)) + '</div>' +
+      '<div class="empty-sub">The NFL doesn&rsquo;t play every day &mdash; use the &#8249; &#8250; arrows to browse,<br>' +
+      'or jump straight to a nearby game day:</div>' +
+      '<div id="nearby-days" class="nearby-days"><span class="muted">Looking for nearby games&hellip;</span></div>' +
+    '</div>';
+  }
+
+  function findNearbyGameDays(base) {
+    const stamp = toYMD(base);
+    const offsets = [-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7];
+    Promise.all(offsets.map(function (off) {
+      const d = addDays(base, off);
+      return fetchScoreboard(d)
+        .then(function (data) { return { date: d, count: (data.events || []).length }; })
+        .catch(function () { return null; });
+    })).then(function (results) {
+      if (toYMD(state.date) !== stamp) return; // the user moved on
+      const el = $('nearby-days');
+      if (!el) return;
+      const hits = results
+        .filter(function (r) { return r && r.count > 0; })
+        .sort(function (a, b) {
+          return Math.abs(a.date - base) - Math.abs(b.date - base);
+        })
+        .slice(0, 6);
+      if (!hits.length) {
+        el.innerHTML = '<span class="muted">No games found within a week.</span>';
+        return;
+      }
+      el.innerHTML = hits.map(function (r) {
+        const past = r.date.getTime() < base.getTime();
+        return '<button class="day-chip" data-ymd="' + toYMD(r.date) + '">' +
+          '<span class="chip-dir">' + (past ? '&#8249;' : '&#8250;') + '</span>' +
+          esc(fmtChipLabel(r.date)) +
+          '<span class="chip-n">' + r.count + (r.count === 1 ? ' game' : ' games') + '</span>' +
+        '</button>';
+      }).join('');
+    });
   }
 
   function updateLiveIndicator() {
@@ -333,8 +465,9 @@
       return '<tr><th><img class="logo" src="' + esc(t.logo) + '" alt=""><span>' + esc(t.abbr) + '</span></th>' +
         cells + '<td class="tot">' + esc(t.score) + '</td></tr>';
     }).join('');
-    return '<table class="linescore"><thead><tr><th>Team</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>T</th></tr></thead>' +
-      '<tbody>' + rows + '</tbody></table>';
+    return '<div class="table-wrap"><table class="linescore">' +
+      '<thead><tr><th>Team</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>T</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table></div>';
   }
 
   function liveSituation() {
@@ -407,7 +540,7 @@
           '<span class="drive-desc">' + esc(d.description || '') + '</span>' +
           result +
         '</div>' +
-        '<table class="plays"><tbody>' + rows + '</tbody></table>' +
+        '<div class="table-wrap"><table class="plays"><tbody>' + rows + '</tbody></table></div>' +
       '</div>';
   }
 
@@ -447,7 +580,7 @@
           '<td class="sd-score">' + score + '</td>' +
         '</tr>';
     }).join('');
-    return '<table class="scoring-drives"><tbody>' + rows + '</tbody></table>';
+    return '<div class="table-wrap"><table class="scoring-drives"><tbody>' + rows + '</tbody></table></div>';
   }
 
   /* -------------------------------- team stats --------------------------- */
@@ -473,7 +606,7 @@
         '<td>' + teamCell(away) + '</td>' +
         '<td>' + teamCell(home) + '</td></tr>'
       : '';
-    return '<table class="team-stats"><tbody>' + head + rows + '</tbody></table>';
+    return '<div class="table-wrap"><table class="team-stats"><tbody>' + head + rows + '</tbody></table></div>';
   }
 
   function teamCell(t) {
@@ -520,8 +653,8 @@
       '<img class="logo" src="' + esc(team.logo) + '" alt=""><span>' +
       esc(team.displayName || team.abbr) + '</span></th></tr>';
 
-    return '<table class="player-stats"><thead>' + teamHead +
-      '<tr class="col-h">' + headCells + '</tr></thead><tbody>' + body + totals + '</tbody></table>';
+    return '<div class="table-wrap"><table class="player-stats"><thead>' + teamHead +
+      '<tr class="col-h">' + headCells + '</tr></thead><tbody>' + body + totals + '</tbody></table></div>';
   }
 
   /* ------------------------------ view toggling -------------------------- */
@@ -570,8 +703,23 @@
     $('next-game').addEventListener('click', function () { stepGame(1); });
 
     $('scoreboard-view').addEventListener('click', function (e) {
+      const chip = e.target.closest('.day-chip');
+      if (chip) {
+        setDate(fromYMD(chip.getAttribute('data-ymd')));
+        return;
+      }
       const card = e.target.closest('.game-card');
       if (card) openGame(card.getAttribute('data-id'));
+    });
+
+    // Keyboard access: Enter / Space opens a focused game card.
+    $('scoreboard-view').addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const card = e.target.closest('.game-card');
+      if (card) {
+        e.preventDefault();
+        openGame(card.getAttribute('data-id'));
+      }
     });
 
     $('tabs').addEventListener('click', function (e) {
@@ -581,6 +729,13 @@
       const tabs = document.querySelectorAll('#tabs .tab');
       tabs.forEach(function (t) { t.classList.toggle('active', t === btn); });
       renderTabContent();
+    });
+
+    // Escape returns from the game view to the scoreboard.
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !$('game-view').classList.contains('hidden')) {
+        showScoreboardView();
+      }
     });
 
     $('date-label').textContent = fmtDateLabel(state.date);

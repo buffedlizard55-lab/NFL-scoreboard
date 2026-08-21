@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Live NFL scoreboard — every game for any day, with play-by-play, team stats and player stats.">
+  <meta name="theme-color" content="#0a1631">
   <title>NFL Scoreboard</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -11,7 +14,10 @@
     <div class="brand">NFL <span>SCOREBOARD</span></div>
     <div class="date-nav">
       <button id="prev-day" class="nav-btn" aria-label="Previous day">&#8249;</button>
-      <span id="date-label" class="date-label"></span>
+      <div class="date-stack">
+        <span id="date-label" class="date-label"></span>
+        <span id="week-label" class="week-label hidden"></span>
+      </div>
       <button id="next-day" class="nav-btn" aria-label="Next day">&#8250;</button>
       <button id="today-btn" class="today-btn">Today</button>
     </div>

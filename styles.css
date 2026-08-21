@@ -59,11 +59,26 @@ html, body {
   margin-left: auto;
 }
 
+.date-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.25;
+}
+
 .date-label {
   min-width: 150px;
   text-align: center;
   font-weight: 600;
   font-size: 14px;
+}
+
+.week-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+  opacity: .7;
 }
 
 .nav-btn, .today-btn, .back-btn {
@@ -200,6 +215,49 @@ main {
 }
 .error { color: #b91c1c; border-color: #fecaca; background: #fff5f5; }
 .loading { color: var(--ink-2); }
+
+.empty-title { font-weight: 700; font-size: 15px; color: var(--ink); margin-bottom: 6px; }
+.empty-sub { margin-bottom: 16px; line-height: 1.5; }
+
+.nearby-days {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.day-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, transform .12s ease;
+}
+.day-chip:hover { border-color: #c8d4ff; background: #f5f8ff; transform: translateY(-1px); }
+.day-chip .chip-dir { color: var(--accent); font-weight: 800; }
+.day-chip .chip-n { color: var(--ink-2); font-weight: 500; }
+
+/* ------------------------------ skeletons ------------------------------- */
+.game-card.skeleton { cursor: default; }
+.sk {
+  height: 14px;
+  border-radius: 6px;
+  margin: 12px 0;
+  background: linear-gradient(90deg, #eef1f5 25%, #f8fafc 45%, #eef1f5 65%);
+  background-size: 200% 100%;
+  animation: shimmer 1.3s linear infinite;
+}
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
 
 /* ------------------------------ game view ------------------------------- */
 .game-toolbar {
@@ -412,6 +470,35 @@ main {
 }
 .player-stats .pl .pname { font-weight: 600; }
 .player-stats .totals td { font-weight: 800; border-top: 2px solid var(--line); }
+
+/* ------------------------- scroll & accessibility ----------------------- */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-wrap .player-stats { min-width: 520px; }
+.table-wrap .scoring-drives { min-width: 560px; }
+.pbp .table-wrap table { min-width: 560px; }
+
+.game-card:focus-visible,
+button:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+.game-card:focus-visible { border-color: var(--accent); }
+
+/* -------------------------------- mobile -------------------------------- */
+@media (max-width: 640px) {
+  .topbar { flex-wrap: wrap; row-gap: 10px; padding: 10px 14px; }
+  .date-nav { width: 100%; justify-content: center; margin-left: 0; order: 3; }
+  .live-indicator { margin-left: auto; }
+  .date-label { min-width: 0; font-size: 13px; }
+  main { padding: 14px; }
+  .cards { grid-template-columns: 1fr; }
+  .g-teams { gap: 6px; }
+  .g-score { font-size: 26px; }
+  .logo.big { width: 48px; height: 48px; }
+  .g-name { font-size: 14px; }
+  .game-toolbar { flex-wrap: wrap; gap: 10px; }
+  .empty-sub br { display: none; }
+}
 
 /* -------------------------------- footer -------------------------------- */
 .footer {
