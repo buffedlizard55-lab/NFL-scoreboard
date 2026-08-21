@@ -1,0 +1,327 @@
+{
+  "event": {
+    "id": "401873286",
+    "name": "Las Vegas Raiders at Houston Texans",
+    "shortName": "LV @ HOU",
+    "date": "2026-08-21T00:00Z",
+    "week": { "number": 3 },
+    "competitions": [
+      {
+        "id": "401873286",
+        "date": "2026-08-21T00:00Z",
+        "attendance": 69765,
+        "venue": {
+          "id": "3891",
+          "fullName": "Reliant Stadium",
+          "address": { "city": "Houston", "state": "TX", "country": "USA" },
+          "indoor": true
+        },
+        "competitors": [
+          {
+            "id": "34",
+            "homeAway": "home",
+            "winner": false,
+            "team": {
+              "id": "34",
+              "abbreviation": "HOU",
+              "displayName": "Houston Texans",
+              "shortDisplayName": "Texans",
+              "location": "Houston",
+              "name": "Texans",
+              "color": "021018",
+              "alternateColor": "eb0028",
+              "logo": "https://a.espncdn.com/i/teamlogos/nfl/500/hou.png"
+            },
+            "score": "20",
+            "linescores": [
+              { "value": 17.0, "displayValue": "17", "period": 1 },
+              { "value": 3.0, "displayValue": "3", "period": 2 },
+              { "value": 0.0, "displayValue": "0", "period": 3 },
+              { "value": 0.0, "displayValue": "0", "period": 4 }
+            ],
+            "records": [
+              { "name": "overall", "type": "total", "summary": "0-2" }
+            ]
+          },
+          {
+            "id": "13",
+            "homeAway": "away",
+            "winner": true,
+            "team": {
+              "id": "13",
+              "abbreviation": "LV",
+              "displayName": "Las Vegas Raiders",
+              "shortDisplayName": "Raiders",
+              "location": "Las Vegas",
+              "name": "Raiders",
+              "color": "000000",
+              "alternateColor": "a5acaf",
+              "logo": "https://a.espncdn.com/i/teamlogos/nfl/500/lv.png"
+            },
+            "score": "22",
+            "linescores": [
+              { "value": 0.0, "displayValue": "0", "period": 1 },
+              { "value": 3.0, "displayValue": "3", "period": 2 },
+              { "value": 7.0, "displayValue": "7", "period": 3 },
+              { "value": 12.0, "displayValue": "12", "period": 4 }
+            ],
+            "records": [
+              { "name": "overall", "type": "total", "summary": "1-1" }
+            ]
+          }
+        ],
+        "status": {
+          "clock": 0.0,
+          "displayClock": "0:00",
+          "period": 4,
+          "type": {
+            "id": "3",
+            "name": "STATUS_FINAL",
+            "state": "post",
+            "completed": true,
+            "description": "Final",
+            "detail": "Final",
+            "shortDetail": "Final"
+          }
+        },
+        "broadcasts": [
+          { "market": "national", "names": ["ESPN"] }
+        ]
+      }
+    ]
+  },
+  "summary": {
+    "boxscore": {
+      "teams": [
+        {
+          "team": {
+            "id": "13",
+            "abbreviation": "LV",
+            "displayName": "Las Vegas Raiders",
+            "shortDisplayName": "Raiders",
+            "color": "000000",
+            "logo": "https://a.espncdn.com/i/teamlogos/nfl/500/lv.png"
+          },
+          "homeAway": "away",
+          "statistics": [
+            { "name": "firstDowns", "displayValue": "22", "label": "1st Downs" },
+            { "name": "thirdDownEff", "displayValue": "4-12", "label": "3rd down efficiency" },
+            { "name": "totalOffensivePlays", "displayValue": "68", "label": "Total Plays" },
+            { "name": "totalYards", "displayValue": "400", "label": "Total Yards" },
+            { "name": "netPassingYards", "displayValue": "241", "label": "Passing" },
+            { "name": "completionAttempts", "displayValue": "23/39", "label": "Comp/Att" },
+            { "name": "sacksYardsLost", "displayValue": "1-11", "label": "Sacks-Yards Lost" },
+            { "name": "rushingYards", "displayValue": "159", "label": "Rushing" },
+            { "name": "rushingAttempts", "displayValue": "28", "label": "Rushing Attempts" },
+            { "name": "redZoneAttempts", "displayValue": "3-3", "label": "Red Zone (Made-Att)" },
+            { "name": "totalPenaltiesYards", "displayValue": "9-83", "label": "Penalties" },
+            { "name": "turnovers", "displayValue": "1", "label": "Turnovers" },
+            { "name": "possessionTime", "displayValue": "30:35", "label": "Possession" }
+          ]
+        },
+        {
+          "team": {
+            "id": "34",
+            "abbreviation": "HOU",
+            "displayName": "Houston Texans",
+            "shortDisplayName": "Texans",
+            "color": "021018",
+            "logo": "https://a.espncdn.com/i/teamlogos/nfl/500/hou.png"
+          },
+          "homeAway": "home",
+          "statistics": [
+            { "name": "firstDowns", "displayValue": "13", "label": "1st Downs" },
+            { "name": "thirdDownEff", "displayValue": "7-17", "label": "3rd down efficiency" },
+            { "name": "totalOffensivePlays", "displayValue": "59", "label": "Total Plays" },
+            { "name": "totalYards", "displayValue": "219", "label": "Total Yards" },
+            { "name": "netPassingYards", "displayValue": "141", "label": "Passing" },
+            { "name": "completionAttempts", "displayValue": "21/31", "label": "Comp/Att" },
+            { "name": "sacksYardsLost", "displayValue": "3-23", "label": "Sacks-Yards Lost" },
+            { "name": "rushingYards", "displayValue": "78", "label": "Rushing" },
+            { "name": "rushingAttempts", "displayValue": "25", "label": "Rushing Attempts" },
+            { "name": "redZoneAttempts", "displayValue": "0-0", "label": "Red Zone (Made-Att)" },
+            { "name": "totalPenaltiesYards", "displayValue": "4-25", "label": "Penalties" },
+            { "name": "turnovers", "displayValue": "2", "label": "Turnovers" },
+            { "name": "possessionTime", "displayValue": "29:25", "label": "Possession" }
+          ]
+        }
+      ],
+      "players": [
+        {
+          "team": {
+            "id": "13",
+            "abbreviation": "LV",
+            "displayName": "Las Vegas Raiders",
+            "color": "000000",
+            "logo": "https://a.espncdn.com/i/teamlogos/nfl/500/lv.png"
+          },
+          "homeAway": "away",
+          "statistics": [
+            {
+              "name": "passing",
+              "labels": ["C/ATT", "YDS", "AVG", "TD", "INT", "SACKS", "RTG"],
+              "athletes": [
+                {
+                  "athlete": {
+                    "id": "4260394",
+                    "displayName": "Aidan O'Connell",
+                    "jersey": "12",
+                    "headshot": { "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4260394.png" }
+                  },
+                  "stats": ["15/24", "166", "6.9", "0", "0", "0-0", "83.0"]
+                },
+                {
+                  "athlete": {
+                    "id": "4837248",
+                    "displayName": "Fernando Mendoza",
+                    "jersey": "15",
+                    "headshot": { "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4837248.png" }
+                  },
+                  "stats": ["8/15", "86", "5.7", "0", "1", "1-11", "42.6"]
+                }
+              ],
+              "totals": ["23/39", "241", "6.5", "0", "1", "1-11", "67.5"]
+            },
+            {
+              "name": "rushing",
+              "labels": ["CAR", "YDS", "AVG", "TD", "LONG"],
+              "athletes": [
+                {
+                  "athlete": {
+                    "id": "4686658",
+                    "displayName": "Mike Washington Jr.",
+                    "jersey": "30",
+                    "headshot": { "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4686658.png" }
+                  },
+                  "stats": ["9", "56", "6.2", "0", "33"]
+                },
+                {
+                  "athlete": {
+                    "id": "4366963",
+                    "displayName": "Dylan Laube",
+                    "jersey": "23",
+                    "headshot": { "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4366963.png" }
+                  },
+                  "stats": ["6", "37", "6.2", "0", "12"]
+                }
+              ],
+              "totals": ["28", "159", "5.7", "0", "33"]
+            }
+          ]
+        }
+      ]
+    },
+    "drives": {
+      "previous": [
+        {
+          "id": "4018732861",
+          "description": "13 plays, 64 yards, 4:54",
+          "team": {
+            "id": "34",
+            "name": "Texans",
+            "abbreviation": "HOU",
+            "displayName": "Houston Texans",
+            "logos": [{ "href": "https://a.espncdn.com/i/teamlogos/nfl/500/hou.png" }]
+          },
+          "start": { "period": { "type": "quarter", "number": 1 }, "clock": { "displayValue": "15:00" }, "yardLine": 35, "text": "HOU 35" },
+          "end": { "period": { "type": "quarter", "number": 1 }, "clock": { "displayValue": "10:06" }, "yardLine": 0, "text": "End Zone" },
+          "timeElapsed": { "displayValue": "4:54" },
+          "yards": 64,
+          "isScore": true,
+          "offensivePlays": 13,
+          "result": "TD",
+          "shortDisplayResult": "TD",
+          "displayResult": "Touchdown",
+          "plays": [
+            {
+              "id": "40187328639",
+              "sequenceNumber": "3900",
+              "type": { "id": "53", "text": "Kickoff", "abbreviation": "K" },
+              "text": "M.Gay kicks 55 yards from LV 35 to HST 10. N.Whittington to HST 31 for 21 yards (D.Ogunbowale; P.Gurd).",
+              "awayScore": 0,
+              "homeScore": 0,
+              "period": { "number": 1 },
+              "clock": { "displayValue": "15:00" },
+              "scoringPlay": false,
+              "statYardage": 21,
+              "start": { "down": 0, "distance": 0, "yardLine": 65, "possessionText": "LV 35" },
+              "end": { "down": 1, "distance": 10, "yardLine": 31, "downDistanceText": "1st & 10 at HOU 31", "possessionText": "HOU 31" },
+              "isPenalty": false,
+              "isTurnover": false
+            },
+            {
+              "id": "40187328662",
+              "sequenceNumber": "6200",
+              "type": { "id": "5", "text": "Rush", "abbreviation": "RUSH" },
+              "text": "W.Marks right guard to HST 40 for 9 yards (C.Lindenberg; T.McCollum).",
+              "awayScore": 0,
+              "homeScore": 0,
+              "period": { "number": 1 },
+              "clock": { "displayValue": "14:54" },
+              "scoringPlay": false,
+              "statYardage": 9,
+              "start": { "down": 1, "distance": 10, "yardLine": 31, "downDistanceText": "1st & 10 at HOU 31", "possessionText": "HOU 31" },
+              "end": { "down": 2, "distance": 1, "yardLine": 40, "downDistanceText": "2nd & 1 at HOU 40", "possessionText": "HOU 40" },
+              "isPenalty": false,
+              "isTurnover": false
+            }
+          ]
+        },
+        {
+          "id": "40187328620",
+          "description": "3 plays, 9 yards, 1:53",
+          "team": {
+            "id": "34",
+            "name": "Texans",
+            "abbreviation": "HOU",
+            "displayName": "Houston Texans",
+            "logos": [{ "href": "https://a.espncdn.com/i/teamlogos/nfl/500/hou.png" }]
+          },
+          "start": { "period": { "type": "quarter", "number": 4 }, "clock": { "displayValue": "7:36" }, "yardLine": 26, "text": "HOU 26" },
+          "end": { "period": { "type": "quarter", "number": 4 }, "clock": { "displayValue": "5:43" }, "yardLine": 35, "text": "HOU 35" },
+          "timeElapsed": { "displayValue": "1:53" },
+          "yards": 9,
+          "isScore": false,
+          "offensivePlays": 3,
+          "result": "PUNT",
+          "shortDisplayResult": "PUNT",
+          "displayResult": "Punt",
+          "plays": [
+            {
+              "id": "4018732863526",
+              "sequenceNumber": "352600",
+              "type": { "id": "53", "text": "Kickoff", "abbreviation": "K" },
+              "text": "K.Matsuzawa kicks 61 yards from LV 35 to HST 4. T.Saunders to HST 26 for 22 yards (D.Perkins; Bu.Johnson).",
+              "awayScore": 16,
+              "homeScore": 20,
+              "period": { "number": 4 },
+              "clock": { "displayValue": "7:36" },
+              "scoringPlay": false,
+              "statYardage": 22,
+              "start": { "down": 0, "distance": 0, "yardLine": 65, "possessionText": "LV 35" },
+              "end": { "down": 1, "distance": 10, "yardLine": 26, "downDistanceText": "1st & 10 at HOU 26", "possessionText": "HOU 26" },
+              "isPenalty": false,
+              "isTurnover": false
+            },
+            {
+              "id": "4018732863556",
+              "sequenceNumber": "355600",
+              "type": { "id": "3", "text": "Pass Incompletion" },
+              "text": "(Shotgun) B.Rypien pass incomplete deep left to J.Kelly (D.Richardson).",
+              "awayScore": 16,
+              "homeScore": 20,
+              "period": { "number": 4 },
+              "clock": { "displayValue": "7:27" },
+              "scoringPlay": false,
+              "statYardage": 0,
+              "start": { "down": 1, "distance": 10, "yardLine": 26, "downDistanceText": "1st & 10 at HOU 26", "possessionText": "HOU 26" },
+              "end": { "down": 2, "distance": 10, "yardLine": 26, "downDistanceText": "2nd & 10 at HOU 26", "possessionText": "HOU 26" },
+              "isPenalty": false,
+              "isTurnover": false
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
