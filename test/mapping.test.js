@@ -92,10 +92,10 @@ ok('playerStatTeams: rushing category', function () {
 // 4. Drives / play-by-play ---------------------------------------------
 ok('playsList: flatten + sort drives in chronological order', function () {
   const plays = NFLMap.playsList(sample.summary.drives);
-  assert.strictEqual(plays.length, 4);
+  assert.strictEqual(plays.length, 10);
   assert.strictEqual(plays[0].type.text, 'Kickoff');
   assert.strictEqual(plays[0].sequenceNumber, '3900');
-  assert.strictEqual(plays[3].sequenceNumber, '355600');
+  assert.strictEqual(plays[9].sequenceNumber, '355600');
 });
 
 ok('playRow: down/distance, scores, clock', function () {
@@ -142,6 +142,100 @@ ok('null-safety: empty inputs do not throw', function () {
   assert.deepStrictEqual(NFLMap.playsList(null), []);
   assert.deepStrictEqual(NFLMap.scoringDrives(null), []);
   assert.strictEqual(NFLMap.driveRow(null), null);
+  assert.strictEqual(NFLMap.classifyBooth(null), '');
+  assert.strictEqual(NFLMap.boothEvent(null), null);
+  assert.deepStrictEqual(NFLMap.boothEvents(null), []);
+});
+
+// 7. Booth: flags, challenges, replay reviews ---------------------------
+ok('classifyBooth: penalty flag, declined, replay, challenge, under review, ordinary play', function () {
+  const plays = NFLMap.playsList(sample.summary.drives);
+  const bySeq = {};
+  plays.forEach(function (p) { bySeq[p.sequenceNumber] = p; });
+
+  assert.strictEqual(NFLMap.classifyBooth(bySeq['6200']), '');
+  assert.strictEqual(NFLMap.classifyBooth(bySeq['8500']), '');
+  assert.strictEqual(NFLMap.classifyBooth(bySeq['8000']), 'penalty');
+  assert.strictEqual(NFLMap.classifyBooth(bySeq['8100']), 'penalty');
+  assert.strictEqual(NFLMap.classifyBooth(bySeq['8200']), 'replay');
+  assert.strictEqual(NFLMap.classifyBooth(bySeq['8300']), 'challenge');
+  assert.strictEqual(NFLMap.classifyBooth(bySeq['8400']), 'review');
+});
+
+ok('boothEvent: penalty object yards + type; declined has no penalty object', function () {
+  const plays = NFLMap.playsList(sample.summary.drives);
+  const flag = NFLMap.boothEvent(plays.find(function (p) { return p.sequenceNumber === '8000'; }));
+  assert.strictEqual(flag.kind, 'penalty');
+  assert.strictEqual(flag.penaltyYards, 5);
+  assert.strictEqual(flag.penaltyType, 'False Start');
+  assert.strictEqual(flag.heading, '5-yard False Start');
+  assert.strictEqual(flag.clock, '10:44');
+  assert.strictEqual(flag.quarter, 2);
+
+  const declined = NFLMap.boothEvent(plays.find(function (p) { return p.sequenceNumber === '8100'; }));
+  assert.strictEqual(declined.kind, 'penalty');
+  assert.strictEqual(declined.penaltyYards, null);
+  assert.strictEqual(declined.result, 'declined');
+  assert.strictEqual(declined.heading, '5-yard Defensive Offside');
+});
+
+ok('boothEvent: replay reversed, challenge upheld, under review pending', function () {
+  const plays = NFLMap.playsList(sample.summary.drives);
+  const replay = NFLMap.boothEvent(plays.find(function (p) { return p.sequenceNumber === '8200'; }));
+  assert.strictEqual(replay.kind, 'replay');
+  assert.strictEqual(replay.result, 'overturned');
+  assert.strictEqual(replay.heading, 'Replay review');
+
+  const chal = NFLMap.boothEvent(plays.find(function (p) { return p.sequenceNumber === '8300'; }));
+  assert.strictEqual(chal.kind, 'challenge');
+  assert.strictEqual(chal.result, 'confirmed');
+  assert.strictEqual(chal.heading, "Coach's challenge");
+
+  const pending = NFLMap.boothEvent(plays.find(function (p) { return p.sequenceNumber === '8400'; }));
+  assert.strictEqual(pending.kind, 'review');
+  assert.strictEqual(pending.result, 'pending');
+});
+
+ok('boothEvents: only flagged plays, chronological, lastPlay de-duped', function () {
+  const events = NFLMap.boothEvents(sample.summary.drives);
+  assert.strictEqual(events.length, 5);
+  assert.deepStrictEqual(events.map(function (e) { return e.kind; }),
+    ['penalty', 'penalty', 'replay', 'challenge', 'review']);
+
+  const last = {
+    id: '4018732869005',
+    text: 'Play under review.',
+    type: { text: 'Pass Reception' },
+    isPenalty: false
+  };
+  const withLive = NFLMap.boothEvents(sample.summary.drives, last);
+  assert.strictEqual(withLive.length, 5);
+
+  const other = {
+    id: 'live-1',
+    text: 'Play under review.',
+    type: { text: 'Rush' },
+    isPenalty: false
+  };
+  const extra = NFLMap.boothEvents(sample.summary.drives, other);
+  assert.strictEqual(extra.length, 6);
+  assert.strictEqual(extra[5].live, true);
+  assert.strictEqual(extra[5].kind, 'review');
+});
+
+ok('boothResult: confirmed / stands / offsetting phrases', function () {
+  assert.strictEqual(NFLMap.boothResult('The ruling on the field is confirmed.'), 'confirmed');
+  assert.strictEqual(NFLMap.boothResult('The ruling on the field stands.'), 'stands');
+  assert.strictEqual(NFLMap.boothResult('PENALTY on LV-X, Holding, 10 yards, Offset.'), 'offsetting');
+  assert.strictEqual(NFLMap.boothResult('W.Marks left tackle to HOU 42 for 2 yards.'), '');
+});
+
+ok('classifyBooth: does not treat "no penalty" ordinary wording as a flag', function () {
+  assert.strictEqual(NFLMap.classifyBooth({
+    text: 'W.Marks left tackle to HOU 42 for 2 yards. No penalty on the play.',
+    type: { text: 'Rush' },
+    isPenalty: false
+  }), '');
 });
 
 console.log('\nAll ' + pass + ' mapping tests passed ✓');

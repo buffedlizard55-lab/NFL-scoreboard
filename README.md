@@ -45,6 +45,11 @@ the repository root — no build step:
   - **Play-by-Play** — every play of every drive (down & distance, clock, play
     description, yardage, running score), highlighted for scoring plays,
     turnovers, and penalties.
+  - **Flags & Reviews** — a chat-style booth log of **penalties**, **coach
+    challenges**, **replay reviews**, and **plays under review**, rebuilt from
+    the same ESPN play-by-play on every 15-second refresh. The scoreboard also
+    surfaces a **Live flags & reviews** ticker from each game's `situation.lastPlay`
+    and a **REVIEW** badge when that last play is under review.
   - **Scoring Drives** — each scoring drive with team, result, plays / yards /
     time, and the score after the play (NFL.com's "Scoring Drives" style).
   - **Team Stats** — full team box score comparison (first downs, total yards,
@@ -100,7 +105,14 @@ npm test
 
 This validates score/team/linescore extraction, team stats, player stat
 categories (passing, rushing, …), play-by-play flattening & ordering, scoring
-drives, quarter labels, and null-safety.
+drives, quarter labels, booth classification (flags / challenges / replay /
+under review), and null-safety.
+
+The booth feed does **not** invent a reviews API. ESPN's summary payload has
+no dedicated challenge/review object; events are classified from verified play
+fields (`isPenalty`, `penalty.yards`, `penalty.type.text`, `type.text`, `text`)
+plus the play description language ESPN itself writes ("PENALTY on …",
+"The replay official reviewed…", "challenged the…", "Play under review.").
 
 ## Notes & limits
 

@@ -320,6 +320,125 @@
               "isTurnover": false
             }
           ]
+        },
+        {
+          "id": "40187328699",
+          "description": "6 plays, fixture flags & reviews",
+          "team": {
+            "id": "13",
+            "name": "Raiders",
+            "abbreviation": "LV",
+            "displayName": "Las Vegas Raiders",
+            "logos": [{ "href": "https://a.espncdn.com/i/teamlogos/nfl/500/lv.png" }]
+          },
+          "start": { "period": { "type": "quarter", "number": 2 }, "clock": { "displayValue": "11:00" }, "yardLine": 25, "text": "LV 25" },
+          "end": { "period": { "type": "quarter", "number": 2 }, "clock": { "displayValue": "9:00" }, "yardLine": 25, "text": "LV 25" },
+          "timeElapsed": { "displayValue": "2:00" },
+          "yards": 0,
+          "isScore": false,
+          "offensivePlays": 6,
+          "result": "PUNT",
+          "shortDisplayResult": "PUNT",
+          "displayResult": "Punt",
+          "plays": [
+            {
+              "id": "4018732869001",
+              "sequenceNumber": "8000",
+              "type": { "text": "Penalty" },
+              "text": "PENALTY on LV-K.Miller, False Start, 5 yards, enforced at LV 25 - No Play.",
+              "awayScore": 0,
+              "homeScore": 7,
+              "period": { "number": 2 },
+              "clock": { "displayValue": "10:44" },
+              "scoringPlay": false,
+              "statYardage": -5,
+              "start": { "down": 1, "distance": 10, "yardLine": 25, "downDistanceText": "1st & 10 at LV 25", "possessionText": "LV 25" },
+              "end": { "down": 1, "distance": 15, "yardLine": 20, "downDistanceText": "1st & 15 at LV 20", "possessionText": "LV 20" },
+              "isPenalty": true,
+              "isTurnover": false,
+              "penalty": { "yards": 5, "type": { "text": "False Start" } }
+            },
+            {
+              "id": "4018732869002",
+              "sequenceNumber": "8100",
+              "type": { "text": "Penalty" },
+              "text": "PENALTY on HOU-D.Hunter, Defensive Offside, 5 yards, declined.",
+              "awayScore": 0,
+              "homeScore": 7,
+              "period": { "number": 2 },
+              "clock": { "displayValue": "10:20" },
+              "scoringPlay": false,
+              "statYardage": 0,
+              "start": { "down": 1, "distance": 15, "yardLine": 20, "downDistanceText": "1st & 15 at LV 20", "possessionText": "LV 20" },
+              "end": { "down": 1, "distance": 15, "yardLine": 20, "downDistanceText": "1st & 15 at LV 20", "possessionText": "LV 20" },
+              "isPenalty": true,
+              "isTurnover": false
+            },
+            {
+              "id": "4018732869003",
+              "sequenceNumber": "8200",
+              "type": { "id": "3", "text": "Pass Incompletion" },
+              "text": "C.Stroud pass short right to N.Collins to HOU 42 for 8 yards (J.Bennett). The replay official reviewed the pass completion ruling, and the play was REVERSED. C.Stroud pass incomplete short right to N.Collins.",
+              "awayScore": 0,
+              "homeScore": 7,
+              "period": { "number": 2 },
+              "clock": { "displayValue": "10:01" },
+              "scoringPlay": false,
+              "statYardage": 0,
+              "start": { "down": 2, "distance": 10, "yardLine": 34, "downDistanceText": "2nd & 10 at HOU 34", "possessionText": "HOU 34" },
+              "end": { "down": 3, "distance": 10, "yardLine": 34, "downDistanceText": "3rd & 10 at HOU 34", "possessionText": "HOU 34" },
+              "isPenalty": false,
+              "isTurnover": false
+            },
+            {
+              "id": "4018732869004",
+              "sequenceNumber": "8300",
+              "type": { "id": "3", "text": "Pass Incompletion" },
+              "text": "Houston challenged the pass completion ruling, and the play was Upheld.",
+              "awayScore": 0,
+              "homeScore": 7,
+              "period": { "number": 2 },
+              "clock": { "displayValue": "9:40" },
+              "scoringPlay": false,
+              "statYardage": 0,
+              "start": { "down": 3, "distance": 10, "yardLine": 34, "downDistanceText": "3rd & 10 at HOU 34", "possessionText": "HOU 34" },
+              "end": { "down": 3, "distance": 10, "yardLine": 34, "downDistanceText": "3rd & 10 at HOU 34", "possessionText": "HOU 34" },
+              "isPenalty": false,
+              "isTurnover": false
+            },
+            {
+              "id": "4018732869005",
+              "sequenceNumber": "8400",
+              "type": { "text": "Pass Reception" },
+              "text": "Play under review.",
+              "awayScore": 0,
+              "homeScore": 7,
+              "period": { "number": 2 },
+              "clock": { "displayValue": "9:12" },
+              "scoringPlay": false,
+              "statYardage": 0,
+              "start": { "down": 1, "distance": 10, "yardLine": 40, "downDistanceText": "1st & 10 at HOU 40", "possessionText": "HOU 40" },
+              "end": { "down": 1, "distance": 10, "yardLine": 40, "downDistanceText": "1st & 10 at HOU 40", "possessionText": "HOU 40" },
+              "isPenalty": false,
+              "isTurnover": false
+            },
+            {
+              "id": "4018732869006",
+              "sequenceNumber": "8500",
+              "type": { "id": "5", "text": "Rush" },
+              "text": "W.Marks left tackle to HOU 42 for 2 yards (T.Wilson).",
+              "awayScore": 0,
+              "homeScore": 7,
+              "period": { "number": 2 },
+              "clock": { "displayValue": "9:00" },
+              "scoringPlay": false,
+              "statYardage": 2,
+              "start": { "down": 2, "distance": 8, "yardLine": 40, "downDistanceText": "2nd & 8 at HOU 40", "possessionText": "HOU 40" },
+              "end": { "down": 3, "distance": 6, "yardLine": 42, "downDistanceText": "3rd & 6 at HOU 42", "possessionText": "HOU 42" },
+              "isPenalty": false,
+              "isTurnover": false
+            }
+          ]
         }
       ]
     }
