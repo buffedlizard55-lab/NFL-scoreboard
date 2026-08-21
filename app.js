@@ -14,9 +14,26 @@
   const TABS = [
     { id: 'plays', label: 'Play-by-Play' },
     { id: 'drives', label: 'Scoring Drives' },
+    { id: 'booth', label: 'Flags & Reviews' },
     { id: 'team', label: 'Team Stats' },
     { id: 'players', label: 'Player Stats' }
   ];
+
+  const BOOTH_KIND_LABEL = {
+    penalty: 'Flag',
+    challenge: 'Challenge',
+    replay: 'Replay',
+    review: 'Under review'
+  };
+
+  const BOOTH_RESULT_LABEL = {
+    pending: 'In progress',
+    overturned: 'Overturned',
+    confirmed: 'Confirmed',
+    stands: 'Stands',
+    declined: 'Declined',
+    offsetting: 'Offsetting'
+  };
 
   const TEAM_STAT_ORDER = [
     ['firstDowns', 'First Downs'],
@@ -64,6 +81,9 @@
     eventIndex: -1,        // open game within state.events
     summary: null,         // raw summary JSON for the open game
     activeTab: 'plays',
+    boothFilter: 'all',    // all | penalty | challenge | replay | review
+    seenBoothIds: {},      // play ids already shown in the booth feed
+    boothPrimed: false,    // first paint of a game's booth marks history as seen
     pollTimer: null
   };
 
@@ -235,7 +255,10 @@
         renderScoreboard();
         updateWeekLabel();
         updateLiveIndicator();
-        if (state.eventIndex >= 0) renderGameHeader();
+        if (state.eventIndex >= 0) {
+          renderGameHeader();
+          if (state.activeTab === 'booth' && state.summary) renderTabContent();
+        }
       })
       .catch(function () { /* keep last good data on transient failure */ });
   }
@@ -263,6 +286,7 @@
       const live = evs.filter(function (e) { return e.status.state === 'in'; });
       const done = evs.filter(function (e) { return e.status.state === 'post'; });
       const pre = evs.filter(function (e) { return e.status.state === 'pre'; });
+      html += liveBoothTickerHTML();
       html += groupHTML('In Progress', live);
       html += groupHTML('Final', done);
       html += groupHTML('Upcoming', pre);
@@ -284,13 +308,18 @@
     if (!away || !home) return '';
     const sub = st.sub ? ' <span class="st-sub">' + esc(st.sub) + '</span>' : '';
     const bcast = ev.broadcast ? '<span class="card-bcast">' + esc(ev.broadcast) + '</span>' : '';
+    const liveBooth = lastPlayBooth(ev);
+    const reviewBadge = (liveBooth && liveBooth.kind === 'review')
+      ? '<span class="badge review">REVIEW</span>'
+      : '';
     const aria = esc(away.abbr) + ' at ' + esc(home.abbr) + ', ' + esc(st.text) +
       (away.score !== '' && home.score !== '' ? ', ' + esc(away.score) + ' to ' + esc(home.score) : '') +
       '. Open game details.';
     return '' +
       '<article class="game-card" data-id="' + esc(ev.id) + '" tabindex="0" role="button" aria-label="' + aria + '">' +
         '<div class="card-top">' +
-          '<span class="badge ' + st.cls + '">' + esc(st.text) + sub + '</span>' + bcast +
+          '<span class="badge ' + st.cls + '">' + esc(st.text) + sub + '</span>' +
+          reviewBadge + bcast +
         '</div>' +
         teamRowHTML(away) +
         teamRowHTML(home) +
@@ -359,14 +388,53 @@
     $('live-indicator').classList.toggle('hidden', !live);
   }
 
+  function lastPlayBooth(ev) {
+    const lp = ev && ev.situation && ev.situation.lastPlay;
+    if (!lp) return null;
+    const kind = NFLMap.classifyBooth(lp);
+    if (!kind) return null;
+    return { kind: kind, play: lp, text: lp.text || lp.shortText || '' };
+  }
+
+  function liveBoothTickerHTML() {
+    const items = [];
+    state.events.forEach(function (ev) {
+      const hit = lastPlayBooth(ev);
+      if (!hit) return;
+      items.push({
+        id: ev.id,
+        shortName: ev.shortName || (ev.away && ev.home ? ev.away.abbr + ' @ ' + ev.home.abbr : ''),
+        kind: hit.kind,
+        text: hit.text,
+        live: ev.status && ev.status.state === 'in'
+      });
+    });
+    if (!items.length) return '';
+    return '<section class="booth-ticker" aria-label="Live flags and reviews">' +
+      '<h2 class="group-title">Live flags &amp; reviews</h2>' +
+      '<p class="booth-ticker-note">From each game&rsquo;s latest play on the scoreboard feed. Open a game for the full booth log.</p>' +
+      '<div class="booth-ticker-list">' + items.map(function (it) {
+        const kind = BOOTH_KIND_LABEL[it.kind] || it.kind;
+        return '<button type="button" class="booth-tick" data-id="' + esc(it.id) + '">' +
+          (it.live ? '<span class="badge live">LIVE</span>' : '') +
+          '<span class="badge ' + esc(it.kind) + '">' + esc(kind) + '</span>' +
+          '<span class="tick-game">' + esc(it.shortName) + '</span>' +
+          '<span class="tick-text">' + esc(it.text) + '</span>' +
+        '</button>';
+      }).join('') + '</div></section>';
+  }
+
   /* ------------------------------- game view ----------------------------- */
 
-  function openGame(id) {
+  function openGame(id, tab) {
     const idx = state.events.findIndex(function (e) { return e.id === id; });
     if (idx < 0) return;
     state.eventIndex = idx;
     state.summary = null;
-    state.activeTab = 'plays';
+    state.activeTab = tab || 'plays';
+    state.boothFilter = 'all';
+    state.seenBoothIds = {};
+    state.boothPrimed = false;
     showGameView();
     renderTabs();
     renderGameHeader();
@@ -498,8 +566,153 @@
     }
     if (state.activeTab === 'plays') el.innerHTML = playsHTML();
     else if (state.activeTab === 'drives') el.innerHTML = drivesHTML();
+    else if (state.activeTab === 'booth') renderBooth(el);
     else if (state.activeTab === 'team') el.innerHTML = teamStatsHTML();
     else if (state.activeTab === 'players') el.innerHTML = playerStatsHTML();
+  }
+
+  function liveLastPlay() {
+    let sit = null;
+    if (state.summary && state.summary.header &&
+        state.summary.header.competitions && state.summary.header.competitions[0]) {
+      sit = state.summary.header.competitions[0].situation;
+    }
+    if ((!sit || !sit.lastPlay) && current()) sit = current().situation;
+    return (sit && sit.lastPlay) ? sit.lastPlay : null;
+  }
+
+  function renderBooth(el) {
+    const events = NFLMap.boothEvents(
+      state.summary && state.summary.drives,
+      liveLastPlay()
+    );
+    const feed = el.querySelector('.booth-feed');
+    const prevScroll = feed ? feed.scrollTop : 0;
+    const nearBottom = !feed ||
+      (feed.scrollHeight - feed.scrollTop - feed.clientHeight < 56);
+
+    el.innerHTML = boothHTML(events);
+
+    const feed2 = el.querySelector('.booth-feed');
+    if (feed2) {
+      if (nearBottom) feed2.scrollTop = feed2.scrollHeight;
+      else feed2.scrollTop = prevScroll;
+    }
+  }
+
+  function boothHTML(events) {
+    const filter = state.boothFilter || 'all';
+    const counts = { all: events.length, penalty: 0, challenge: 0, replay: 0, review: 0 };
+    events.forEach(function (e) {
+      if (counts[e.kind] != null) counts[e.kind] += 1;
+    });
+    const visible = events.filter(function (e) {
+      return filter === 'all' || e.kind === filter;
+    });
+
+    const newIds = [];
+    visible.forEach(function (e) {
+      const id = e.id != null ? String(e.id) : '';
+      if (!id) return;
+      if (state.boothPrimed && !state.seenBoothIds[id]) newIds.push(id);
+    });
+    if (!state.boothPrimed) {
+      events.forEach(function (e) {
+        if (e.id != null) state.seenBoothIds[String(e.id)] = true;
+      });
+      state.boothPrimed = true;
+    } else {
+      events.forEach(function (e) {
+        if (e.id != null) state.seenBoothIds[String(e.id)] = true;
+      });
+    }
+
+    const filters = [
+      ['all', 'All'],
+      ['penalty', 'Flags'],
+      ['challenge', 'Challenges'],
+      ['replay', 'Replay'],
+      ['review', 'Under review']
+    ].map(function (pair) {
+      const id = pair[0], label = pair[1];
+      const n = counts[id];
+      const extra = id === 'all' ? '' : ' · ' + n;
+      return '<button type="button" class="booth-filter' + (filter === id ? ' active' : '') +
+        '" data-booth-filter="' + id + '"' +
+        (n === 0 && id !== 'all' ? ' disabled' : '') + '>' +
+        esc(label) + extra + '</button>';
+    }).join('');
+
+    const lastPlay = liveLastPlay();
+    const lastText = lastPlay ? (lastPlay.text || lastPlay.shortText || '') : '';
+    const livePending = !!(current() && current().status && current().status.state === 'in' && lastPlay &&
+      (NFLMap.classifyBooth(lastPlay) === 'review' || NFLMap.boothResult(lastText) === 'pending'));
+    const banner = livePending
+      ? '<div class="booth-banner" role="status">' +
+          '<span class="badge review">UNDER REVIEW</span>' +
+          '<span>' + esc(lastText) + '</span>' +
+        '</div>'
+      : '';
+
+    let body;
+    if (!visible.length) {
+      body = '<div class="empty booth-empty">No flags, challenges, or replay reviews in the play-by-play yet.</div>';
+    } else {
+      body = '<div class="booth-feed" role="log" aria-live="polite" aria-relevant="additions">' +
+        visible.map(function (e) {
+          return boothMsgHTML(e, newIds.indexOf(e.id != null ? String(e.id) : '') >= 0);
+        }).join('') +
+      '</div>';
+    }
+
+    const live = current() && current().status && current().status.state === 'in';
+    const foot = live
+      ? 'Live booth log · pulled from ESPN play-by-play · refreshes every 15s'
+      : 'Booth log · pulled from ESPN play-by-play';
+
+    return '<div class="booth">' +
+      '<div class="booth-head">' +
+        '<div class="booth-title">Flags, challenges &amp; replay reviews</div>' +
+        '<div class="booth-sub">' + esc(foot) + '</div>' +
+      '</div>' +
+      '<div class="booth-filters">' + filters + '</div>' +
+      banner +
+      body +
+    '</div>';
+  }
+
+  function boothMsgHTML(e, isNew) {
+    const q = NFLMap.quarterLabel(e.quarter);
+    const when = [q, e.clock].filter(Boolean).join(' · ');
+    const kind = BOOTH_KIND_LABEL[e.kind] || e.kind;
+    const result = e.result ? BOOTH_RESULT_LABEL[e.result] || e.result : '';
+    const score = (e.awayScore != null && e.homeScore != null)
+      ? esc(e.awayScore) + '–' + esc(e.homeScore)
+      : '';
+    const logo = e.team && e.team.logo
+      ? '<img class="logo" src="' + esc(e.team.logo) + '" alt="">'
+      : '';
+    const team = e.team && e.team.abbr
+      ? '<span class="booth-team">' + esc(e.team.abbr) + '</span>'
+      : '';
+    const dd = e.downDistance
+      ? '<span class="booth-dd">' + esc(e.downDistance) + '</span>'
+      : '';
+    const liveTag = e.live ? '<span class="badge live">LIVE</span>' : '';
+    return '' +
+      '<article class="booth-msg ' + esc(e.kind) + (isNew ? ' new' : '') + '">' +
+        '<div class="booth-msg-top">' +
+          '<span class="booth-when">' + esc(when) + '</span>' +
+          liveTag +
+          '<span class="badge ' + esc(e.kind) + '">' + esc(kind) + '</span>' +
+          (result ? '<span class="badge result ' + esc(e.result) + '">' + esc(result) + '</span>' : '') +
+          '<span class="booth-score">' + score + '</span>' +
+        '</div>' +
+        '<div class="booth-msg-head">' + logo + team +
+          '<span class="booth-heading">' + esc(e.heading) + '</span>' + dd +
+        '</div>' +
+        '<p class="booth-text">' + esc(e.text) + '</p>' +
+      '</article>';
   }
 
   /* ------------------------------- play by play -------------------------- */
@@ -674,6 +887,9 @@
     state.events = [];
     state.eventIndex = -1;
     state.summary = null;
+    state.boothFilter = 'all';
+    state.seenBoothIds = {};
+    state.boothPrimed = false;
     $('date-label').textContent = fmtDateLabel(d);
     showScoreboardView();
     loadScoreboard();
@@ -706,6 +922,11 @@
       const chip = e.target.closest('.day-chip');
       if (chip) {
         setDate(fromYMD(chip.getAttribute('data-ymd')));
+        return;
+      }
+      const tick = e.target.closest('.booth-tick');
+      if (tick) {
+        openGame(tick.getAttribute('data-id'), 'booth');
         return;
       }
       const card = e.target.closest('.game-card');
