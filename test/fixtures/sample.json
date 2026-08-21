@@ -10,6 +10,7 @@
         "id": "401873286",
         "date": "2026-08-21T00:00Z",
         "attendance": 69765,
+        "playByPlayAvailable": true,
         "venue": {
           "id": "3891",
           "fullName": "Reliant Stadium",
