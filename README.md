@@ -1,8 +1,11 @@
 # NFL Scoreboard
 
-A clean, single-page NFL scoreboard. Pick a day, click between games, and drill
-into a game to see **live play-by-play**, **team stats**, and **player stats** —
-with the same level of detail as NFL.com's Game Center. **No videos.**
+A clean, single-page NFL scoreboard. Pick a day, browse **every game** on it,
+and drill into a game to see **live play-by-play**, **team stats**, and
+**player stats** — with the same level of detail as NFL.com's Game Center.
+**No videos.**
+
+**Live on GitHub Pages → <https://buffedlizard55-lab.github.io/NFL-scoreboard/>**
 
 ![status: works](https://img.shields.io/badge/status-works-green)
 
@@ -13,14 +16,29 @@ npm start        # serves the app on http://0.0.0.0:8080 (no install step needed
 npm test         # runs the data-mapping unit tests (no network required)
 ```
 
-There are **no dependencies** — the server is plain Node's `http` module and the
-frontend is vanilla HTML/CSS/JS.
+There are **no dependencies** — the local server is plain Node's `http` module
+and the frontend is vanilla HTML/CSS/JS. You can also open `index.html`
+through any static host — that is exactly how GitHub Pages serves it.
+
+## GitHub Pages
+
+The app is 100% static (all data comes from ESPN's CORS-enabled public API,
+fetched straight from the browser), so GitHub Pages publishes it directly from
+the repository root — no build step:
+
+- Pages source: branch `main`, path `/` (the app files live at the repo root).
+- `_config.yml` tells the Pages (Jekyll) build to skip dev scaffolding
+  (`server.js`, `package.json`, `test/`, …) so only the app ships.
+- Every merge to `main` redeploys the site automatically.
 
 ## What it does
 
 - **Scoreboard view** — all games for a selected day, grouped into *In Progress*,
   *Final*, and *Upcoming*, with team logos, records, scores, status, and broadcast.
-  Navigate days with the ‹ › arrows or jump back to **Today**.
+  Navigate days with the ‹ › arrows or jump back to **Today**. The header shows
+  which **NFL week** the selected day belongs to (e.g. "Preseason Week 2"), and
+  days with no games suggest **nearby game days** you can jump to with one tap.
+  Cards are keyboard-accessible (Tab + Enter), and Escape returns from a game.
 - **Game view** (click any game) — team header with scores, records, a Q1–Q4 + T
   line-score table, venue, broadcast, and attendance, plus a prev/next game
   switcher and four tabs:
@@ -59,12 +77,13 @@ real API responses (e.g. Raiders @ Texans, 2026 preseason, event `401873286`).
 ## Project layout
 
 ```
-server.js                 # dependency-free static server (Node built-ins)
-public/
-  index.html              # app shell
-  styles.css              # styling
-  app.js                  # UI + data fetching (scoreboard & game detail)
-  lib/mapping.js          # pure data-mapping helpers (browser + Node)
+index.html                # app shell (repo root = what GitHub Pages serves)
+styles.css                # styling
+app.js                    # UI + data fetching (scoreboard & game detail)
+lib/mapping.js            # pure data-mapping helpers (browser + Node)
+favicon.svg               # site icon
+_config.yml               # GitHub Pages (Jekyll) excludes for dev files
+server.js                 # dependency-free dev server (Node built-ins)
 test/
   mapping.test.js         # unit tests for the mapping helpers
   fixtures/sample.json    # fixtures mirroring the real API response shapes

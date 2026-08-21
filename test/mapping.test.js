@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * Unit tests for the pure data-mapping helpers (public/lib/mapping.js).
+ * Unit tests for the pure data-mapping helpers (lib/mapping.js).
  *
  * Run with:  node test/mapping.test.js   (or `npm test`)
  *
@@ -11,7 +11,7 @@
  */
 
 const assert = require('assert');
-const NFLMap = require('../public/lib/mapping.js');
+const NFLMap = require('../lib/mapping.js');
 const sample = require('./fixtures/sample.json');
 
 let pass = 0;
