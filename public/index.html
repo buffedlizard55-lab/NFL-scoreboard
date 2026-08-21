@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NFL Scoreboard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">NFL <span>SCOREBOARD</span></div>
+    <div class="date-nav">
+      <button id="prev-day" class="nav-btn" aria-label="Previous day">&#8249;</button>
+      <span id="date-label" class="date-label"></span>
+      <button id="next-day" class="nav-btn" aria-label="Next day">&#8250;</button>
+      <button id="today-btn" class="today-btn">Today</button>
+    </div>
+    <div id="live-indicator" class="live-indicator hidden"><span class="dot"></span>LIVE</div>
+  </header>
+
+  <main>
+    <section id="scoreboard-view"></section>
+
+    <section id="game-view" class="hidden">
+      <div class="game-toolbar">
+        <button id="back-btn" class="back-btn">&#8249; Scores</button>
+        <div class="game-switcher">
+          <button id="prev-game" class="nav-btn" aria-label="Previous game">&#8249;</button>
+          <span id="game-pos" class="game-pos"></span>
+          <button id="next-game" class="nav-btn" aria-label="Next game">&#8250;</button>
+        </div>
+      </div>
+
+      <div id="game-header" class="game-header"></div>
+
+      <nav id="tabs" class="tabs"></nav>
+
+      <div id="game-content" class="game-content"></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    Clean NFL scoreboard &middot; live data via ESPN&rsquo;s public API &middot; no videos
+    &middot; <span class="muted">not affiliated with the NFL or NFL.com</span>
+  </footer>
+
+  <script src="lib/mapping.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
