@@ -84,6 +84,10 @@
     boothFilter: 'all',    // all | penalty | challenge | replay | review
     seenBoothIds: {},      // play ids already shown in the booth feed
     boothPrimed: false,    // first paint of a game's booth marks history as seen
+    daySummaries: {},      // eventId -> { drives } for every played game of the day
+    dayBoothFetching: {},  // eventId -> true while its summary is in flight
+    dayFeed: { items: [], seen: {}, primed: false }, // day-wide booth chat feed
+    dayBoothFilter: 'all', // filter for the day-wide booth chat
     pollTimer: null
   };
 
@@ -234,6 +238,7 @@
         state.events = (data.events || []).map(NFLMap.summarizeEvent).filter(Boolean);
         renderScoreboard();
         updateLiveIndicator();
+        refreshDayBooth();
       })
       .catch(function (err) {
         $('scoreboard-view').innerHTML =
@@ -255,6 +260,7 @@
         renderScoreboard();
         updateWeekLabel();
         updateLiveIndicator();
+        refreshDayBooth();
         if (state.eventIndex >= 0) {
           renderGameHeader();
           if (state.activeTab === 'booth' && state.summary) renderTabContent();
@@ -286,7 +292,6 @@
       const live = evs.filter(function (e) { return e.status.state === 'in'; });
       const done = evs.filter(function (e) { return e.status.state === 'post'; });
       const pre = evs.filter(function (e) { return e.status.state === 'pre'; });
-      html += liveBoothTickerHTML();
       html += groupHTML('In Progress', live);
       html += groupHTML('Final', done);
       html += groupHTML('Upcoming', pre);
@@ -396,32 +401,243 @@
     return { kind: kind, play: lp, text: lp.text || lp.shortText || '' };
   }
 
-  function liveBoothTickerHTML() {
-    const items = [];
-    state.events.forEach(function (ev) {
-      const hit = lastPlayBooth(ev);
-      if (!hit) return;
-      items.push({
-        id: ev.id,
-        shortName: ev.shortName || (ev.away && ev.home ? ev.away.abbr + ' @ ' + ev.home.abbr : ''),
-        kind: hit.kind,
-        text: hit.text,
-        live: ev.status && ev.status.state === 'in'
+  /* ----------------------- day-wide live booth chat ---------------------- */
+  /*
+   * A chat-style feed of every flag, challenge and replay review from every
+   * game of the selected day. It is built from the same two verified
+   * sources as a game's own Flags & Reviews tab:
+   *   - each played game's summary play-by-play (summary.drives), and
+   *   - each game's latest play from the scoreboard feed (situation.lastPlay),
+   *     which ESPN only includes while a game is live.
+   * Messages are kept in discovery order (games are seeded in kickoff
+   * order; newly discovered messages are appended at the bottom), so it
+   * reads like a chat. No per-play timestamps are invented: ordering is by
+   * the sequence ESPN assigns inside each game and by kickoff time across
+   * games.
+   */
+
+  function fetchSummaryQuiet(id) {
+    return fetch(SUMMARY_URL + '?event=' + encodeURIComponent(id))
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
       });
+  }
+
+  function dayBoothGames() {
+    return state.events.slice().sort(function (a, b) {
+      const ta = a.date ? new Date(a.date).getTime() : 0;
+      const tb = b.date ? new Date(b.date).getTime() : 0;
+      return ta - tb;
     });
-    if (!items.length) return '';
-    return '<section class="booth-ticker" aria-label="Live flags and reviews">' +
-      '<h2 class="group-title">Live flags &amp; reviews</h2>' +
-      '<p class="booth-ticker-note">From each game&rsquo;s latest play on the scoreboard feed. Open a game for the full booth log.</p>' +
-      '<div class="booth-ticker-list">' + items.map(function (it) {
-        const kind = BOOTH_KIND_LABEL[it.kind] || it.kind;
-        return '<button type="button" class="booth-tick" data-id="' + esc(it.id) + '">' +
-          (it.live ? '<span class="badge live">LIVE</span>' : '') +
-          '<span class="badge ' + esc(it.kind) + '">' + esc(kind) + '</span>' +
-          '<span class="tick-game">' + esc(it.shortName) + '</span>' +
-          '<span class="tick-text">' + esc(it.text) + '</span>' +
-        '</button>';
-      }).join('') + '</div></section>';
+  }
+
+  function dayBoothScannable(ev) {
+    const st = ev.status && ev.status.state;
+    if (st !== 'in' && st !== 'post') return false;      // pre-game: no plays yet
+    if (ev.playByPlayAvailable === false) return false;  // ESPN has no pbp for it
+    return true;
+  }
+
+  /*
+   * Fetch the play-by-play of every game that has (or had) action:
+   * live games on every cycle, finished games once per selected day.
+   * Each response re-renders the feed as it arrives.
+   */
+  function refreshDayBooth() {
+    if (!state.events.length) {
+      renderDayBooth();
+      return;
+    }
+    const stamp = toYMD(state.date);
+    const jobs = [];
+    state.events.forEach(function (ev) {
+      if (!ev.id || !dayBoothScannable(ev)) return;
+      if (state.dayBoothFetching[ev.id]) return; // already in flight
+      const st = ev.status && ev.status.state;
+      if (st === 'post' && state.daySummaries[ev.id]) return; // finals are cached
+      state.dayBoothFetching[ev.id] = true;
+      jobs.push(
+        fetchSummaryQuiet(ev.id)
+          .then(function (json) {
+            if (toYMD(state.date) !== stamp) return; // the user moved on
+            state.daySummaries[ev.id] = { drives: json.drives || null };
+            renderDayBooth();
+          })
+          .catch(function () { /* keep last good data on transient failure */ })
+          .then(function () { delete state.dayBoothFetching[ev.id]; })
+      );
+    });
+    if (!jobs.length) renderDayBooth();
+  }
+
+  function renderDayBooth() {
+    const el = $('day-booth');
+    if (!el) return;
+    if (!state.events.length) {
+      el.classList.add('hidden');
+      return;
+    }
+    // Keep the section hidden while the game view is open (the 15s refresh
+    // still updates its content, it just must not reappear underneath).
+    if ($('scoreboard-view').classList.contains('hidden')) {
+      el.classList.add('hidden');
+    } else {
+      el.classList.remove('hidden');
+    }
+
+    const fresh = NFLMap.dayBoothFeed(dayBoothGames().map(function (ev) {
+      const cached = state.daySummaries[ev.id] || null;
+      const lastPlay = (ev.situation && ev.situation.lastPlay) || null;
+      return {
+        id: ev.id,
+        shortName: ev.shortName ||
+          (ev.away && ev.home ? ev.away.abbr + ' @ ' + ev.home.abbr : ''),
+        awayAbbr: (ev.away && ev.away.abbr) || '',
+        homeAbbr: (ev.home && ev.home.abbr) || '',
+        date: ev.date || null,
+        live: !!(ev.status && ev.status.state === 'in'),
+        events: NFLMap.boothEvents(cached && cached.drives, lastPlay)
+      };
+    }));
+
+    // Chat semantics: never drop messages discovered for this day — append
+    // the newly discovered ones at the bottom of the feed.
+    const seen = state.dayFeed.seen;
+    if (!state.dayFeed.primed) {
+      state.dayFeed.items = fresh;
+      state.dayFeed.primed = true;
+      fresh.forEach(function (it) { seen[it.key] = true; });
+    } else {
+      fresh.forEach(function (it) {
+        if (seen[it.key]) return;
+        seen[it.key] = true;
+        state.dayFeed.items.push(it);
+      });
+    }
+
+    const feed = el.querySelector('.day-feed');
+    const prevScroll = feed ? feed.scrollTop : 0;
+    const nearBottom = !feed ||
+      (feed.scrollHeight - feed.scrollTop - feed.clientHeight < 56);
+
+    el.innerHTML = dayBoothHTML();
+
+    const feed2 = el.querySelector('.day-feed');
+    if (feed2) {
+      if (nearBottom) feed2.scrollTop = feed2.scrollHeight;
+      else feed2.scrollTop = prevScroll;
+    }
+  }
+
+  function liveGamesNow() {
+    const live = {};
+    state.events.forEach(function (ev) {
+      if (ev.id && ev.status && ev.status.state === 'in') live[ev.id] = true;
+    });
+    return live;
+  }
+
+  function dayBoothHTML() {
+    const filter = state.dayBoothFilter || 'all';
+    const items = state.dayFeed.items || [];
+    const liveNow = liveGamesNow();
+    const counts = { all: items.length, penalty: 0, challenge: 0, replay: 0, review: 0 };
+    items.forEach(function (e) {
+      if (counts[e.kind] != null) counts[e.kind] += 1;
+    });
+    const visible = items.filter(function (e) {
+      return filter === 'all' || e.kind === filter;
+    });
+
+    const filters = [
+      ['all', 'All'],
+      ['penalty', 'Flags'],
+      ['challenge', 'Challenges'],
+      ['replay', 'Replay'],
+      ['review', 'Under review']
+    ].map(function (pair) {
+      const id = pair[0], label = pair[1];
+      const n = counts[id];
+      const extra = id === 'all' ? '' : ' · ' + n;
+      return '<button type="button" class="booth-filter day-filter' +
+        (filter === id ? ' active' : '') +
+        '" data-day-filter="' + id + '"' +
+        (n === 0 && id !== 'all' ? ' disabled' : '') + '>' +
+        esc(label) + extra + '</button>';
+    }).join('');
+
+    const scannable = state.events.filter(dayBoothScannable).length;
+    const scanned = Object.keys(state.daySummaries).length;
+    const liveCount = state.events.filter(function (e) {
+      return e.status && e.status.state === 'in';
+    }).length;
+    const foot =
+      'Every flag &amp; review from all of today&rsquo;s games · pulled from ESPN play-by-play · refreshes every 15s' +
+      (scannable ? ' · games scanned ' + scanned + ' of ' + scannable : '') +
+      (liveCount ? ' · ' + liveCount + ' game' + (liveCount === 1 ? '' : 's') + ' live' : '');
+
+    let body;
+    if (!visible.length) {
+      body = '<div class="empty booth-empty">' +
+        (scanned < scannable
+          ? 'Scanning today&rsquo;s games for flags and reviews&hellip;'
+          : 'No flags or reviews on this day yet &mdash; kickoff hasn&rsquo;t happened, or the games were clean.') +
+        '</div>';
+    } else {
+      body = '<div class="day-feed" role="log" aria-live="polite" aria-relevant="additions">' +
+        visible.map(function (e) {
+          return dayBoothMsgHTML(e, !!liveNow[e.gameId]);
+        }).join('') +
+      '</div>';
+    }
+
+    return '<div class="booth day-booth">' +
+      '<div class="booth-head">' +
+        '<div class="booth-title">Live booth &middot; flags &amp; reviews &middot; all games</div>' +
+        '<div class="booth-sub">' + foot + '</div>' +
+      '</div>' +
+      '<div class="booth-filters">' + filters + '</div>' +
+      body +
+    '</div>';
+  }
+
+  function dayBoothMsgHTML(e, liveNow) {
+    const q = NFLMap.quarterLabel(e.quarter);
+    const when = [q, e.clock].filter(Boolean).join(' · ');
+    const kind = BOOTH_KIND_LABEL[e.kind] || e.kind;
+    const result = e.result ? BOOTH_RESULT_LABEL[e.result] || e.result : '';
+    const score = (e.awayScore != null && e.homeScore != null)
+      ? esc(e.awayAbbr) + ' ' + esc(e.awayScore) + '–' + esc(e.homeScore) + ' ' + esc(e.homeAbbr)
+      : '';
+    const logo = e.team && e.team.logo
+      ? '<img class="logo" src="' + esc(e.team.logo) + '" alt="">'
+      : '';
+    const team = e.team && e.team.abbr
+      ? '<span class="booth-team">' + esc(e.team.abbr) + '</span>'
+      : '';
+    const dd = e.downDistance
+      ? '<span class="booth-dd">' + esc(e.downDistance) + '</span>'
+      : '';
+    const liveTag = liveNow ? '<span class="badge live">LIVE</span>' : '';
+    const aria = esc(e.shortName) + ', ' + esc(kind) + ': ' + esc(e.text) +
+      '. Open this game.';
+    return '' +
+      '<button type="button" class="booth-msg day-msg ' + esc(e.kind) +
+        '" data-id="' + esc(e.gameId) + '" aria-label="' + aria + '">' +
+        '<span class="booth-msg-top">' +
+          '<span class="day-game">' + esc(e.shortName) + '</span>' +
+          liveTag +
+          '<span class="badge ' + esc(e.kind) + '">' + esc(kind) + '</span>' +
+          (result ? '<span class="badge result ' + esc(e.result) + '">' + esc(result) + '</span>' : '') +
+          '<span class="booth-when">' + esc(when) + '</span>' +
+          (score ? '<span class="booth-score">' + score + '</span>' : '') +
+        '</span>' +
+        '<span class="booth-msg-head">' + logo + team +
+          '<span class="booth-heading">' + esc(e.heading) + '</span>' + dd +
+        '</span>' +
+        '<span class="booth-text">' + esc(e.text) + '</span>' +
+      '</button>';
   }
 
   /* ------------------------------- game view ----------------------------- */
@@ -875,10 +1091,12 @@
   function showScoreboardView() {
     $('game-view').classList.add('hidden');
     $('scoreboard-view').classList.remove('hidden');
+    if (state.events.length) $('day-booth').classList.remove('hidden');
   }
 
   function showGameView() {
     $('scoreboard-view').classList.add('hidden');
+    $('day-booth').classList.add('hidden');
     $('game-view').classList.remove('hidden');
   }
 
@@ -890,6 +1108,11 @@
     state.boothFilter = 'all';
     state.seenBoothIds = {};
     state.boothPrimed = false;
+    state.daySummaries = {};
+    state.dayBoothFetching = {};
+    state.dayFeed = { items: [], seen: {}, primed: false };
+    state.dayBoothFilter = 'all';
+    $('day-booth').classList.add('hidden');
     $('date-label').textContent = fmtDateLabel(d);
     showScoreboardView();
     loadScoreboard();
@@ -924,13 +1147,24 @@
         setDate(fromYMD(chip.getAttribute('data-ymd')));
         return;
       }
-      const tick = e.target.closest('.booth-tick');
-      if (tick) {
-        openGame(tick.getAttribute('data-id'), 'booth');
-        return;
-      }
       const card = e.target.closest('.game-card');
       if (card) openGame(card.getAttribute('data-id'));
+    });
+
+    // The day-wide booth chat: filter buttons + click a message to open
+    // that game's own Flags & Reviews tab.
+    $('day-booth').addEventListener('click', function (e) {
+      const filt = e.target.closest('.day-filter');
+      if (filt) {
+        state.dayBoothFilter = filt.getAttribute('data-day-filter');
+        renderDayBooth();
+        return;
+      }
+      const msg = e.target.closest('.day-msg');
+      if (msg) {
+        openGame(msg.getAttribute('data-id'), 'booth');
+        return;
+      }
     });
 
     // Keyboard access: Enter / Space opens a focused game card.

@@ -238,4 +238,67 @@ ok('classifyBooth: does not treat "no penalty" ordinary wording as a flag', func
   }), '');
 });
 
+// 8. Day-wide booth feed (all games of a day, chat-style merge) ----------
+ok('summarizeEvent: carries playByPlayAvailable through from the competition', function () {
+  const ev = NFLMap.summarizeEvent(sample.event);
+  assert.strictEqual(ev.playByPlayAvailable, true);
+  // Missing field must not be invented: it maps to null, not false.
+  const bare = { id: 'x', competitions: [{ competitors: [], status: { type: {} } }] };
+  assert.strictEqual(NFLMap.summarizeEvent(bare).playByPlayAvailable, null);
+});
+
+ok('dayBoothFeed: merges each game\'s booth events with game attribution, in game order', function () {
+  const eventsA = NFLMap.boothEvents(sample.summary.drives);
+  const eventsB = [{
+    id: '999001',
+    seq: '1',
+    kind: 'challenge',
+    text: 'N.Kwon challenged the runner was down by contact ruling.',
+    result: 'confirmed',
+    heading: "Coach's challenge",
+    quarter: 1,
+    clock: '9:15',
+    awayScore: 0,
+    homeScore: 0,
+    team: { abbr: 'SF', displayName: 'San Francisco 49ers', logo: '' }
+  }];
+  const feed = NFLMap.dayBoothFeed([
+    { id: '401873286', shortName: 'LV @ HOU', awayAbbr: 'LV', homeAbbr: 'HOU', live: false, events: eventsA },
+    { id: '401873299', shortName: 'SF @ LAC', awayAbbr: 'SF', homeAbbr: 'LAC', live: true, events: eventsB }
+  ]);
+  assert.strictEqual(feed.length, eventsA.length + eventsB.length);
+  assert.strictEqual(feed[0].gameId, '401873286');
+  assert.strictEqual(feed[0].shortName, 'LV @ HOU');
+  assert.strictEqual(feed[0].key, '401873286:' + eventsA[0].id);
+  assert.strictEqual(feed[0].liveGame, false);
+  const last = feed[feed.length - 1];
+  assert.strictEqual(last.gameId, '401873299');
+  assert.strictEqual(last.shortName, 'SF @ LAC');
+  assert.strictEqual(last.kind, 'challenge');
+  assert.strictEqual(last.liveGame, true);
+  assert.strictEqual(last.awayAbbr, 'SF');
+  assert.strictEqual(last.homeAbbr, 'LAC');
+});
+
+ok('dayBoothFeed: dedupes the same play id, first occurrence wins', function () {
+  const eventsA = NFLMap.boothEvents(sample.summary.drives);
+  const feed = NFLMap.dayBoothFeed([
+    { id: '401873286', shortName: 'LV @ HOU', events: eventsA },
+    { id: '401873286', shortName: 'LV @ HOU', events: eventsA } // stale duplicate pass
+  ]);
+  assert.strictEqual(feed.length, eventsA.length);
+  const keys = feed.map(function (e) { return e.key; });
+  assert.strictEqual(new Set(keys).size, keys.length);
+});
+
+ok('dayBoothFeed: null-safety and missing play ids', function () {
+  assert.deepStrictEqual(NFLMap.dayBoothFeed(null), []);
+  assert.deepStrictEqual(NFLMap.dayBoothFeed([]), []);
+  const feed = NFLMap.dayBoothFeed([
+    { id: 'g1', shortName: 'A @ B', events: [{ id: null, seq: '2', kind: 'penalty', text: 'PENALTY on A' }] },
+    { id: 'g1', shortName: 'A @ B', events: [{ id: null, seq: '2', kind: 'penalty', text: 'PENALTY on A' }] }
+  ]);
+  assert.strictEqual(feed.length, 1); // no-id plays dedupe on their fallback key
+});
+
 console.log('\nAll ' + pass + ' mapping tests passed ✓');

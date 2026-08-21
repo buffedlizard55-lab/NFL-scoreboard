@@ -39,6 +39,15 @@ the repository root — no build step:
   which **NFL week** the selected day belongs to (e.g. "Preseason Week 2"), and
   days with no games suggest **nearby game days** you can jump to with one tap.
   Cards are keyboard-accessible (Tab + Enter), and Escape returns from a game.
+- **Live booth chat (all games)** — a chat-style feed at the top of the
+  scoreboard that merges **every flag, coach challenge, and replay review from
+  every game of the selected day** into one live log. Messages carry the game
+  (e.g. "LV @ HOU"), a LIVE badge while that game is in progress, the flag
+  type and result, quarter & clock, and the play text, and can be filtered by
+  kind (All / Flags / Challenges / Replay / Under review). New messages appear
+  at the bottom as the feed discovers them, and clicking one opens that game's
+  own **Flags & Reviews** tab. The scoreboard also keeps a **REVIEW** badge on
+  a game card while its last play is under review.
 - **Game view** (click any game) — team header with scores, records, a Q1–Q4 + T
   line-score table, venue, broadcast, and attendance, plus a prev/next game
   switcher and four tabs:
@@ -47,9 +56,7 @@ the repository root — no build step:
     turnovers, and penalties.
   - **Flags & Reviews** — a chat-style booth log of **penalties**, **coach
     challenges**, **replay reviews**, and **plays under review**, rebuilt from
-    the same ESPN play-by-play on every 15-second refresh. The scoreboard also
-    surfaces a **Live flags & reviews** ticker from each game's `situation.lastPlay`
-    and a **REVIEW** badge when that last play is under review.
+    the same ESPN play-by-play on every 15-second refresh.
   - **Scoring Drives** — each scoring drive with team, result, plays / yards /
     time, and the score after the play (NFL.com's "Scoring Drives" style).
   - **Team Stats** — full team box score comparison (first downs, total yards,
@@ -57,8 +64,10 @@ the repository root — no build step:
   - **Player Stats** — passing, rushing, receiving, defense, kicking, punting,
     and return stats per player, with team totals.
 - **Live updates** — the scoreboard refreshes every 15 seconds; when a game is
-  in progress its play-by-play and stats also refresh every 15 seconds. A red
-  **LIVE** badge appears whenever a game is live.
+  in progress its play-by-play and stats also refresh every 15 seconds, and the
+  day-wide booth chat refetches the play-by-play of every live game each cycle
+  (finished games are fetched once per selected day). A red **LIVE** badge
+  appears whenever a game is live.
 
 ## Where the data comes from (the honest answer on "reverse-engineering NFL.com")
 
@@ -106,7 +115,7 @@ npm test
 This validates score/team/linescore extraction, team stats, player stat
 categories (passing, rushing, …), play-by-play flattening & ordering, scoring
 drives, quarter labels, booth classification (flags / challenges / replay /
-under review), and null-safety.
+under review), day-wide feed merging / attribution / dedupe, and null-safety.
 
 The booth feed does **not** invent a reviews API. ESPN's summary payload has
 no dedicated challenge/review object; events are classified from verified play
@@ -119,5 +128,9 @@ plus the play description language ESPN itself writes ("PENALTY on …",
 - Live latency is bounded by the polling cadence (15 s), not real-time push.
 - Preseason games sometimes have `playByPlayAvailable: false`; the app shows a
   friendly "not available" message rather than erroring.
+- The day-wide booth chat does not invent per-play timestamps: plays are
+  ordered by the sequence ESPN assigns inside each game, games are seeded in
+  kickoff order, and newly discovered messages are appended at the bottom of
+  the chat as they arrive.
 - This project is **not affiliated with the NFL, NFL.com, or ESPN**; it is an
   independent scoreboard UI over ESPN's public API.
