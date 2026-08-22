@@ -90,6 +90,8 @@
     summaryRequests: {},   // eventId -> { promise, final } for an in-flight fetch
     dayFeed: { items: [], primed: false }, // day-wide booth chat feed
     dayBoothFilter: 'all', // filter for the day-wide booth chat
+    alertedBoothKeys: {},   // non-penalty booth events already announced
+    audioContext: null,     // created only after a user gesture (autoplay policy)
     polling: null
   };
 
@@ -533,6 +535,58 @@
     if (!jobs.length && !state.dayFeed.primed) renderDayBooth();
   }
 
+  /*
+   * Browsers block unsolicited audio until the listener has interacted with
+   * the page. A gesture unlocks Web Audio; later live booth updates can then
+   * announce challenges, replay reviews, and under-review plays. Penalties are
+   * deliberately excluded here.
+   */
+  function unlockBoothAudio() {
+    if (state.audioContext || typeof AudioContext === 'undefined') return;
+    try {
+      state.audioContext = new AudioContext();
+      if (state.audioContext.state === 'suspended') state.audioContext.resume();
+    } catch (e) {
+      state.audioContext = null;
+    }
+  }
+
+  function buzzBoothAlert() {
+    const ctx = state.audioContext;
+    if (!ctx) return;
+    try {
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const start = ctx.currentTime;
+      oscillator.type = 'sawtooth';
+      oscillator.frequency.setValueAtTime(180, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      // A pulsing three-second tone is clearly a buzz without being continuous.
+      for (let i = 0; i < 6; i += 1) {
+        const at = start + i * 0.5;
+        gain.gain.linearRampToValueAtTime(0.12, at + 0.04);
+        gain.gain.linearRampToValueAtTime(0.0001, at + 0.24);
+      }
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.start(start);
+      oscillator.stop(start + 3);
+    } catch (e) {
+      // Audio is an enhancement; a browser/device audio failure must not stop polling.
+    }
+  }
+
+  function announceNewBoothEvents(fresh) {
+    let shouldBuzz = false;
+    (fresh || []).forEach(function (event) {
+      const key = event && event.key != null ? String(event.key) : '';
+      if (!key || state.alertedBoothKeys[key]) return;
+      state.alertedBoothKeys[key] = true;
+      if (event.kind !== 'penalty') shouldBuzz = true;
+    });
+    if (shouldBuzz) buzzBoothAlert();
+  }
+
   function renderDayBooth() {
     const el = $('day-booth');
     if (!el) return;
@@ -565,11 +619,16 @@
     }));
 
     // Keep discovery order, append new messages, and replace an existing item
-    // when ESPN updates that same play with the review result.
+    // when ESPN updates that same play with the review result. The first load
+    // establishes history silently; only later discoveries can alert.
     if (!state.dayFeed.primed) {
       state.dayFeed.items = fresh;
       state.dayFeed.primed = true;
+      fresh.forEach(function (event) {
+        if (event && event.key != null) state.alertedBoothKeys[String(event.key)] = true;
+      });
     } else {
+      announceNewBoothEvents(fresh);
       state.dayFeed.items = NFLMap.reconcileDayBoothFeed(state.dayFeed.items, fresh);
     }
 
@@ -1153,6 +1212,7 @@
     state.summaryRequests = {};
     state.dayFeed = { items: [], primed: false };
     state.dayBoothFilter = 'all';
+    state.alertedBoothKeys = {};
     $('day-booth').classList.add('hidden');
     $('date-label').textContent = fmtDateLabel(d);
     showScoreboardView();
@@ -1173,6 +1233,11 @@
   /* --------------------------------- init -------------------------------- */
 
   function init() {
+    // Unlock audio from an explicit user gesture; this is required by browsers
+    // and keeps the initial page load silent.
+    document.addEventListener('click', unlockBoothAudio);
+    document.addEventListener('keydown', unlockBoothAudio);
+
     $('prev-day').addEventListener('click', function () { setDate(addDays(state.date, -1)); });
     $('next-day').addEventListener('click', function () { setDate(addDays(state.date, 1)); });
     $('today-btn').addEventListener('click', function () { setDate(new Date()); });
