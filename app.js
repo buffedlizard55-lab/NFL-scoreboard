@@ -11,6 +11,7 @@
   const SCOREBOARD_URL = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard';
   const SUMMARY_URL = 'https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/summary';
   const LIVE_REVIEW_SECONDS = NFLRefresh.LIVE_REVIEWS_INTERVAL_MS / 1000;
+  const BOOTH_SOUND_KEY = 'nflBoothSoundEnabled'; // persisted toggle for the booth alert sound
 
   const TABS = [
     { id: 'plays', label: 'Play-by-Play' },
@@ -92,6 +93,7 @@
     dayBoothFilter: 'all', // filter for the day-wide booth chat
     alertedBoothKeys: {},   // non-penalty booth events already announced
     audioContext: null,     // created only after a user gesture (autoplay policy)
+    soundEnabled: true,     // booth alert sound; ON by default so existing alerts still play
     polling: null
   };
 
@@ -576,6 +578,35 @@
     }
   }
 
+  function loadBoothSoundPref() {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      const stored = localStorage.getItem(BOOTH_SOUND_KEY);
+      if (stored === '0') state.soundEnabled = false;
+      else if (stored === '1') state.soundEnabled = true;
+    } catch (e) { /* storage unavailable — keep the default (on) */ }
+  }
+
+  function saveBoothSoundPref() {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem(BOOTH_SOUND_KEY, state.soundEnabled ? '1' : '0');
+    } catch (e) { /* storage unavailable — ignore */ }
+  }
+
+  function toggleBoothSound() {
+    state.soundEnabled = !state.soundEnabled;
+    saveBoothSoundPref();
+    renderDayBooth(); // refresh the button label/state in the booth header
+    // The click is itself a user gesture, so it can unlock Web Audio and play
+    // the exact same alert buzz — the button doubles as a sound test.
+    unlockBoothAudio();
+    if (state.audioContext && state.audioContext.state === 'suspended') {
+      state.audioContext.resume();
+    }
+    buzzBoothAlert();
+  }
+
   function announceNewBoothEvents(fresh) {
     let shouldBuzz = false;
     (fresh || []).forEach(function (event) {
@@ -584,7 +615,7 @@
       state.alertedBoothKeys[key] = true;
       if (event.kind !== 'penalty') shouldBuzz = true;
     });
-    if (shouldBuzz) buzzBoothAlert();
+    if (shouldBuzz && state.soundEnabled) buzzBoothAlert();
   }
 
   function renderDayBooth() {
@@ -710,10 +741,21 @@
       '</div>';
     }
 
+    const soundOn = !!state.soundEnabled;
+    const soundTitle = soundOn
+      ? 'Alert sound ON - buzzes on new challenges and replay reviews. Click to mute.'
+      : 'Alert sound OFF - click to enable and test the alert buzz.';
     return '<div class="booth day-booth">' +
       '<div class="booth-head">' +
-        '<div class="booth-title">Live booth &middot; flags &amp; reviews &middot; all games</div>' +
-        '<div class="booth-sub">' + foot + '</div>' +
+        '<div class="booth-head-main">' +
+          '<div class="booth-title">Live booth &middot; flags &amp; reviews &middot; all games</div>' +
+          '<div class="booth-sub">' + foot + '</div>' +
+        '</div>' +
+        '<button type="button" class="day-sound-btn' + (soundOn ? ' on' : '') +
+          '" aria-pressed="' + (soundOn ? 'true' : 'false') + '"' +
+          ' title="' + soundTitle + '">' +
+          (soundOn ? '&#128276; Sound On' : '&#128263; Sound Off') +
+        '</button>' +
       '</div>' +
       '<div class="booth-filters">' + filters + '</div>' +
       body +
@@ -1286,6 +1328,7 @@
     // and keeps the initial page load silent.
     document.addEventListener('click', unlockBoothAudio);
     document.addEventListener('keydown', unlockBoothAudio);
+    loadBoothSoundPref();
 
     $('prev-day').addEventListener('click', function () { setDate(addDays(state.date, -1)); });
     $('next-day').addEventListener('click', function () { setDate(addDays(state.date, 1)); });
@@ -1304,9 +1347,13 @@
       if (card) openGame(card.getAttribute('data-id'));
     });
 
-    // The day-wide booth chat: filter buttons + click a message to open
-    // that game's own Flags & Reviews tab.
+    // The day-wide booth chat: sound toggle + filter buttons + click a message
+    // to open that game's own Flags & Reviews tab.
     $('day-booth').addEventListener('click', function (e) {
+      if (e.target.closest('.day-sound-btn')) {
+        toggleBoothSound();
+        return;
+      }
       const filt = e.target.closest('.day-filter');
       if (filt) {
         state.dayBoothFilter = filt.getAttribute('data-day-filter');

@@ -51,6 +51,10 @@ the repository root — no build step:
   **score before → during → after** the event and badge the events that
   **removed points** (for example, a touchdown taken away by an offensive
   penalty or a replay reversal), including the scoring play that was nullified.
+  The booth header has a **sound toggle button** (🔔 Sound On / 🔇 Sound Off)
+  like the MLB replay feed: it is ON by default so automatic alerts keep
+  working as before, and each click plays the exact same 3-second alert buzz
+  so you can test the sound. The preference is remembered in the browser.
 - **Game view** (click any game) — team header with scores, records, a Q1–Q4 + T
   line-score table, venue, broadcast, and attendance, plus a prev/next game
   switcher and five tabs:
@@ -135,7 +139,8 @@ under review), booth before/during/after score tracking and called-back-score
 detection, day-wide feed merging / attribution / dedupe, in-place review
 result updates, null-safety, the 15-second/1-second polling cadences, visibility
 gating, immediate refresh, timer cleanup, browser-app wiring, request dedupe,
-and rendering against an injected API-shaped payload.
+the booth sound button (renders, toggles, and triggers the alert buzz), and
+rendering against an injected API-shaped payload.
 
 The booth feed does **not** call or invent a separate reviews endpoint. It
 classifies the play records returned by the summary endpoint using fields

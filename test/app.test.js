@@ -23,13 +23,17 @@ function classList() {
 function element() {
   let html = '';
   let htmlWrites = 0;
+  const listeners = {};
   return {
     classList: classList(),
     get innerHTML() { return html; },
     set innerHTML(value) { html = value; htmlWrites += 1; },
     innerHTMLWrites: function () { return htmlWrites; },
     textContent: '',
-    addEventListener: function () {},
+    addEventListener: function (type, callback) { listeners[type] = callback; },
+    dispatch: function (type, event) {
+      if (listeners[type]) listeners[type](event);
+    },
     querySelector: function () { return null; }
   };
 }
@@ -109,6 +113,42 @@ async function run() {
     ]
   });
 
+  // Minimal Web Audio stand-in so the smoke test can verify the booth sound
+  // button reaches the same buzz code path the alert system uses.
+  const audio = { oscillatorCount: 0 };
+  function fakeOscillator() {
+    audio.oscillatorCount += 1;
+    return {
+      type: '',
+      frequency: {
+        setValueAtTime: function () {},
+        linearRampToValueAtTime: function () {}
+      },
+      connect: function () {},
+      start: function () {},
+      stop: function () {}
+    };
+  }
+  function fakeGain() {
+    return {
+      gain: {
+        setValueAtTime: function () {},
+        linearRampToValueAtTime: function () {}
+      },
+      connect: function () {}
+    };
+  }
+  class FakeAudioContext {
+    constructor() {
+      this.state = 'running';
+      this.currentTime = 0;
+      this.destination = {};
+    }
+    resume() { return Promise.resolve(); }
+    createOscillator() { return fakeOscillator(); }
+    createGain() { return fakeGain(); }
+  }
+
   function response(json) {
     return { ok: true, status: 200, json: function () { return Promise.resolve(json); } };
   }
@@ -124,6 +164,7 @@ async function run() {
   const context = {
     console: console,
     document: document,
+    AudioContext: FakeAudioContext,
     fetch: function (url, options) {
       fetches.push(url);
       fetchOptions.push(options);
@@ -231,6 +272,29 @@ async function run() {
   assert.strictEqual(elements['day-booth'].innerHTMLWrites(), dayWritesAfterFinal);
   assert.ok(fetchOptions.every(function (options) { return options && options.cache === 'no-store'; }));
 
+  // Booth sound button: renders in the all-games booth, defaults ON, and
+  // clicking it toggles the label and plays the same alert buzz.
+  function clickSoundButton() {
+    elements['day-booth'].dispatch('click', {
+      target: {
+        closest: function (selector) {
+          return selector === '.day-sound-btn' ? {} : null;
+        }
+      }
+    });
+  }
+  assert.ok(elements['day-booth'].innerHTML.indexOf('day-sound-btn') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('&#128276; Sound On') !== -1);
+  assert.strictEqual(audio.oscillatorCount, 0, 'no audio before the sound button is used');
+  clickSoundButton();
+  await flush();
+  assert.strictEqual(elements['day-booth'].innerHTML.indexOf('&#128263; Sound Off') !== -1, true);
+  assert.ok(audio.oscillatorCount > 0, 'clicking the sound button plays the alert buzz');
+  clickSoundButton();
+  await flush();
+  assert.ok(elements['day-booth'].innerHTML.indexOf('&#128276; Sound On') !== -1);
+  assert.ok(audio.oscillatorCount > 1, 're-enabling the sound plays the preview buzz again');
+
   console.log('NFL scoreboard app smoke test');
   console.log('  ✓ live details use the 1-second timer');
   console.log('  ✓ overlapping detail requests are deduplicated');
@@ -241,6 +305,7 @@ async function run() {
   console.log('  ✓ a live-to-final transition fetches one final detail snapshot');
   console.log('  ✓ idle final-game ticks do not rebuild an unchanged booth feed');
   console.log('  ✓ live review content renders from the supplied API-shaped payload');
+  console.log('  ✓ the booth sound button toggles and plays the alert buzz');
 }
 
 run().catch(function (err) {
