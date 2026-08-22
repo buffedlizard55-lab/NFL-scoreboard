@@ -47,7 +47,10 @@ the repository root — no build step:
   kind (All / Flags / Challenges / Replay / Under review). New messages appear
   at the bottom as the feed discovers them, and clicking one opens that game's
   own **Flags & Reviews** tab. The scoreboard also keeps a **REVIEW** badge on
-  a game card while its last play is under review.
+  a game card while its last play is under review. Booth events also show the
+  **score before → during → after** the event and badge the events that
+  **removed points** (for example, a touchdown taken away by an offensive
+  penalty or a replay reversal), including the scoring play that was nullified.
 - **Game view** (click any game) — team header with scores, records, a Q1–Q4 + T
   line-score table, venue, broadcast, and attendance, plus a prev/next game
   switcher and five tabs:
@@ -58,7 +61,10 @@ the repository root — no build step:
     challenges**, **replay reviews**, and **plays under review**, rebuilt from
     ESPN play-by-play on a 1-second schedule while a game is live. If the same
     classified play arrives with a changed review result, its existing message
-    is updated in place.
+    is updated in place. Each entry tracks the running score **before →
+    during → after** the flag/review/challenge, flags events that **removed
+    points** (e.g. a 5-yard TD erased by an offensive penalty or a TD
+    reversed by replay), and names the scoring play that was nullified.
   - **Scoring Drives** — each scoring drive with team, result, plays / yards /
     time, and the score after the play (NFL.com's "Scoring Drives" style).
   - **Team Stats** — full team box score comparison (first downs, total yards,
@@ -125,7 +131,8 @@ npm test
 This validates score/team/linescore extraction, team stats, player stat
 categories (passing, rushing, …), play-by-play flattening & ordering, scoring
 drives, quarter labels, booth classification (flags / challenges / replay /
-under review), day-wide feed merging / attribution / dedupe, in-place review
+under review), booth before/during/after score tracking and called-back-score
+detection, day-wide feed merging / attribution / dedupe, in-place review
 result updates, null-safety, the 15-second/1-second polling cadences, visibility
 gating, immediate refresh, timer cleanup, browser-app wiring, request dedupe,
 and rendering against an injected API-shaped payload.
@@ -135,6 +142,10 @@ classifies the play records returned by the summary endpoint using fields
 present in those records (`isPenalty`, `penalty.yards`, `penalty.type.text`,
 `type.text`, `text`) and tested description phrases such as "PENALTY on …",
 "The replay official reviewed…", "challenged the…", and "Play under review."
+The before/during/after score tracking and `points removed` badge also use
+only the per-play running scores already returned by ESPN
+(`awayScore` / `homeScore`); an event is reported as removing points only when
+that running score actually drops, so the app does not invent corrections.
 
 ## Notes & limits
 

@@ -252,7 +252,197 @@ ok('classifyBooth: does not treat "no penalty" ordinary wording as a flag', func
   }), '');
 });
 
-// 8. Day-wide booth feed (all games of a day, chat-style merge) ----------
+// 8. Score-state tracking: before / during / after + points removed ------
+ok('boothScoreEffect: offensive penalty removes a counted touchdown', function () {
+  const plays = [
+    { id: 'p1', sequenceNumber: '100', type: { text: 'Rush' },
+      text: 'L.Smith right guard for 5 yards, TOUCHDOWN.', awayScore: 7, homeScore: 0,
+      scoringPlay: true, isPenalty: false },
+    { id: 'p2', sequenceNumber: '200', type: { text: 'Penalty' },
+      text: 'PENALTY on LV-X, Offensive Holding, 10 yards, enforced at LV 25 - No Play.',
+      awayScore: 0, homeScore: 0, isPenalty: true,
+      penalty: { yards: 10, type: { text: 'Offensive Holding' } } },
+    { id: 'p3', sequenceNumber: '300', type: { text: 'Rush' },
+      text: 'L.Smith left guard to LV 20 for 2 yards.', awayScore: 0, homeScore: 0,
+      scoringPlay: false, isPenalty: false }
+  ];
+  const effect = NFLMap.boothScoreEffect(plays, 1);
+  assert.deepStrictEqual(effect.before, { away: 7, home: 0 });
+  assert.deepStrictEqual(effect.during, { away: 0, home: 0 });
+  assert.deepStrictEqual(effect.after, { away: 0, home: 0 });
+  assert.strictEqual(effect.removesPoints, true);
+  assert.strictEqual(effect.pointsRemoved, 7);
+  assert.strictEqual(effect.team, 'away');
+});
+
+ok('boothEventContext: flags a called-back touchdown and names the scoring play', function () {
+  const plays = [
+    { id: 'p1', sequenceNumber: '100', type: { text: 'Rush' },
+      text: 'L.Smith right guard for 5 yards, TOUCHDOWN.', awayScore: 7, homeScore: 0,
+      scoringPlay: true, isPenalty: false },
+    { id: 'p2', sequenceNumber: '200', type: { text: 'Penalty' },
+      text: 'PENALTY on LV-X, Offensive Holding, 10 yards, enforced at LV 25 - No Play.',
+      awayScore: 0, homeScore: 0, isPenalty: true,
+      penalty: { yards: 10, type: { text: 'Offensive Holding' } } }
+  ];
+  const event = NFLMap.boothEvent(plays[1]);
+  const withContext = NFLMap.boothEventContext(event, plays, 1);
+  assert.strictEqual(withContext.kind, 'penalty');
+  assert.strictEqual(withContext.removesPoints, true);
+  assert.strictEqual(withContext.pointsRemoved, 7);
+  assert.strictEqual(withContext.removedTeam, 'away');
+  assert.strictEqual(withContext.beforeAwayScore, 7);
+  assert.strictEqual(withContext.beforeHomeScore, 0);
+  assert.strictEqual(withContext.duringAwayScore, 0);
+  assert.strictEqual(withContext.afterAwayScore, 0);
+  assert.strictEqual(withContext.relatedScoringPlay.points, 7);
+  assert.strictEqual(withContext.relatedScoringPlay.team, 'away');
+  assert.strictEqual(withContext.relatedScoringPlay.id, 'p1');
+});
+
+ok('boothScoreEffect: under review followed by reversal removes a touchdown', function () {
+  const plays = [
+    { id: 'r1', sequenceNumber: '1000', type: { text: 'Rush' },
+      text: 'J.Banks 2 yard run, TOUCHDOWN.', awayScore: 0, homeScore: 7,
+      scoringPlay: true, isPenalty: false },
+    { id: 'r2', sequenceNumber: '1100', type: { text: 'Pass Reception' },
+      text: 'Play under review.', awayScore: 0, homeScore: 7,
+      scoringPlay: false, isPenalty: false },
+    { id: 'r3', sequenceNumber: '1200', type: { text: 'Replay Review' },
+      text: 'The replay official reviewed the ruling, and the play was REVERSED. Runner short of the goal line.',
+      awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false },
+    { id: 'r4', sequenceNumber: '1300', type: { text: 'Rush' },
+      text: 'J.Banks left tackle for no gain.', awayScore: 0, homeScore: 0,
+      scoringPlay: false, isPenalty: false }
+  ];
+  const underReview = NFLMap.boothScoreEffect(plays, 1);
+  assert.deepStrictEqual(underReview.before, { away: 0, home: 7 });
+  assert.deepStrictEqual(underReview.during, { away: 0, home: 7 });
+  assert.deepStrictEqual(underReview.after, { away: 0, home: 0 });
+  assert.strictEqual(underReview.removesPoints, true);
+  assert.strictEqual(underReview.pointsRemoved, 7);
+  assert.strictEqual(underReview.team, 'home');
+
+  const replay = NFLMap.boothScoreEffect(plays, 2);
+  assert.deepStrictEqual(replay.before, { away: 0, home: 7 });
+  assert.deepStrictEqual(replay.during, { away: 0, home: 0 });
+  assert.deepStrictEqual(replay.after, { away: 0, home: 0 });
+  assert.strictEqual(replay.removesPoints, true);
+});
+
+ok('boothEvents: enriches both review and replay entries in a reversed TD sequence', function () {
+  const drives = { previous: [{
+    id: 'd1', team: { abbreviation: 'HOU', displayName: 'Houston Texans', logos: [] },
+    plays: [
+      { id: 'r1', sequenceNumber: '1000', type: { text: 'Rush' },
+        text: 'J.Banks 2 yard run, TOUCHDOWN.', awayScore: 0, homeScore: 7,
+        scoringPlay: true, isPenalty: false },
+      { id: 'r2', sequenceNumber: '1100', type: { text: 'Pass Reception' },
+        text: 'Play under review.', awayScore: 0, homeScore: 7,
+        scoringPlay: false, isPenalty: false },
+      { id: 'r3', sequenceNumber: '1200', type: { text: 'Replay Review' },
+        text: 'The replay official reviewed the ruling, and the play was REVERSED. Runner short of the goal line.',
+        awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false },
+      { id: 'r4', sequenceNumber: '1300', type: { text: 'Rush' },
+        text: 'J.Banks left tackle for no gain.', awayScore: 0, homeScore: 0,
+        scoringPlay: false, isPenalty: false }
+    ]
+  }] };
+  const events = NFLMap.boothEvents(drives);
+  assert.strictEqual(events.length, 2);
+
+  const review = events[0];
+  assert.strictEqual(review.kind, 'review');
+  assert.strictEqual(review.removesPoints, true);
+  assert.strictEqual(review.pointsRemoved, 7);
+  assert.deepStrictEqual([review.beforeAwayScore, review.beforeHomeScore], [0, 7]);
+  assert.deepStrictEqual([review.afterAwayScore, review.afterHomeScore], [0, 0]);
+
+  const replay = events[1];
+  assert.strictEqual(replay.kind, 'replay');
+  assert.strictEqual(replay.removesPoints, true);
+  assert.strictEqual(replay.pointsRemoved, 7);
+});
+
+ok('boothScoreEffect: confirmed challenge and declined penalty do not report removed points', function () {
+  const confirmed = [
+    { id: 'c1', sequenceNumber: '100', type: { text: 'Rush' },
+      text: 'K.Cole 4 yard TD run.', awayScore: 7, homeScore: 0,
+      scoringPlay: true, isPenalty: false },
+    { id: 'c2', sequenceNumber: '200', type: { text: 'Pass Reception' },
+      text: 'The ruling on the field is confirmed.', awayScore: 7, homeScore: 0,
+      scoringPlay: false, isPenalty: false },
+    { id: 'c3', sequenceNumber: '300', type: { text: 'Kickoff' },
+      text: 'K.Cole kicks 65 yards.', awayScore: 7, homeScore: 0,
+      scoringPlay: false, isPenalty: false }
+  ];
+  const challengeEffect = NFLMap.boothScoreEffect(confirmed, 1);
+  assert.strictEqual(challengeEffect.removesPoints, false);
+  assert.strictEqual(challengeEffect.pointsRemoved, 0);
+  assert.deepStrictEqual(challengeEffect.after, { away: 7, home: 0 });
+
+  const declined = [
+    { id: 'd1', sequenceNumber: '100', type: { text: 'Rush' },
+      text: 'K.Cole run for 3 yards.', awayScore: 0, homeScore: 0,
+      scoringPlay: false, isPenalty: false },
+    { id: 'd2', sequenceNumber: '200', type: { text: 'Penalty' },
+      text: 'PENALTY on HOU-D.Thomas, Defensive Offside, 5 yards, declined.',
+      awayScore: 0, homeScore: 0, isPenalty: true,
+      penalty: { type: { text: 'Defensive Offside' } } }
+  ];
+  const declinedEffect = NFLMap.boothScoreEffect(declined, 1);
+  assert.strictEqual(declinedEffect.removesPoints, false);
+  assert.strictEqual(declinedEffect.pointsRemoved, 0);
+});
+
+ok('nearestScoringPlay: a review that mentions "no touchdown" is not mistaken for a scoring play', function () {
+  const plays = [
+    { id: 'p1', sequenceNumber: '100', type: { text: 'Rush' },
+      text: 'N.Moore 3 yard run, TOUCHDOWN.', awayScore: 0, homeScore: 7,
+      scoringPlay: true, isPenalty: false },
+    { id: 'p2', sequenceNumber: '200', type: { text: 'Pass Reception' },
+      text: 'Play under review.', awayScore: 0, homeScore: 7,
+      scoringPlay: false, isPenalty: false },
+    { id: 'p3', sequenceNumber: '300', type: { text: 'Replay Review' },
+      text: 'The replay official reviewed the ruling, and the play was REVERSED. No touchdown.',
+      awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false },
+    { id: 'p4', sequenceNumber: '400', type: { text: 'Penalty' },
+      text: 'PENALTY on HOU-D.Thomas, Defensive Offside, 5 yards, declined.',
+      awayScore: 0, homeScore: 0, isPenalty: true,
+      penalty: { type: { text: 'Defensive Offside' } } }
+  ];
+  const event = NFLMap.boothEventContext(NFLMap.boothEvent(plays[3]), plays, 3);
+  assert.strictEqual(event.relatedScoringPlay.id, 'p1');
+  assert.strictEqual(event.relatedScoringPlay.points, 7);
+});
+
+ok('boothScoreEffect: live under-review play without a score does not invent a rollback', function () {
+  const plays = [
+    { id: 'l1', sequenceNumber: '100', type: { text: 'Rush' },
+      text: 'J.Banks 2 yard run, TOUCHDOWN.', awayScore: 0, homeScore: 7,
+      scoringPlay: true, isPenalty: false },
+    { id: 'l2', sequenceNumber: '1100', type: { text: 'Pass Reception' },
+      text: 'Play under review.', awayScore: 0, homeScore: 7,
+      scoringPlay: false, isPenalty: false },
+    { id: 'l3', sequenceNumber: '1200', type: { text: 'Pass Reception' },
+      text: 'Play under review.', scoringPlay: false, isPenalty: false }
+  ];
+  const effect = NFLMap.boothScoreEffect(plays, 2);
+  assert.strictEqual(effect.removesPoints, false);
+  assert.strictEqual(effect.pointsRemoved, 0);
+  assert.deepStrictEqual(effect.during, { away: 0, home: 7 });
+  assert.deepStrictEqual(effect.after, { away: 0, home: 7 });
+});
+
+ok('boothScoreEffect / boothEventContext: null and out-of-range safety', function () {
+  const empty = NFLMap.boothScoreEffect(null, 0);
+  assert.strictEqual(empty.removesPoints, false);
+  assert.deepStrictEqual(empty.before, { away: 0, home: 0 });
+  assert.strictEqual(NFLMap.boothEventContext(null, null, 0), null);
+  assert.strictEqual(NFLMap.boothEventContext({ id: 'x' }, [], -1).removesPoints, false);
+});
+
+// 9. Day-wide booth feed (all games of a day, chat-style merge) ----------
 ok('summarizeEvent: carries playByPlayAvailable through from the competition', function () {
   const ev = NFLMap.summarizeEvent(sample.event);
   assert.strictEqual(ev.playByPlayAvailable, true);
