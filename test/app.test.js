@@ -113,6 +113,54 @@ async function run() {
     ]
   });
 
+  // Pending (not yet resolved) and confirmed score-review chains, so the smoke
+  // test also covers the new "may remove points" and "points stood" states.
+  summary.drives.previous.push({
+    id: 'pending-score-drive',
+    description: 'fixture: pending score review',
+    result: 'No Play',
+    displayResult: 'No Play',
+    isScore: false,
+    team: { abbreviation: 'LV', displayName: 'Las Vegas Raiders', logos: [] },
+    plays: [
+      {
+        id: 'risk-1', sequenceNumber: '500000', type: { text: 'Rush' },
+        text: 'T.Sanders 3 yard run, TOUCHDOWN.', awayScore: 7, homeScore: 7,
+        scoringPlay: true, isPenalty: false
+      },
+      {
+        id: 'risk-2', sequenceNumber: '501000', type: { text: 'Pass Reception' },
+        text: 'Play under review.', awayScore: 7, homeScore: 7,
+        scoringPlay: false, isPenalty: false
+      }
+    ]
+  });
+  summary.drives.previous.push({
+    id: 'held-score-drive',
+    description: 'fixture: upheld score review',
+    result: 'Touchdown',
+    displayResult: 'Touchdown',
+    isScore: true,
+    team: { abbreviation: 'HOU', displayName: 'Houston Texans', logos: [] },
+    plays: [
+      {
+        id: 'held-1', sequenceNumber: '600000', type: { text: 'Rush' },
+        text: 'C.Stroud 4 yard run, TOUCHDOWN.', awayScore: 7, homeScore: 14,
+        scoringPlay: true, isPenalty: false
+      },
+      {
+        id: 'held-2', sequenceNumber: '601000', type: { text: 'Pass Reception' },
+        text: 'Play under review.', awayScore: 7, homeScore: 14,
+        scoringPlay: false, isPenalty: false
+      },
+      {
+        id: 'held-3', sequenceNumber: '602000', type: { text: 'Replay Review' },
+        text: 'The ruling on the field is confirmed.', awayScore: 7, homeScore: 14,
+        scoringPlay: false, isPenalty: false
+      }
+    ]
+  });
+
   // Minimal Web Audio stand-in so the smoke test can verify the booth sound
   // button reaches the same buzz code path the alert system uses.
   const audio = { oscillatorCount: 0 };
@@ -213,6 +261,14 @@ async function run() {
   assert.ok(elements['day-booth'].innerHTML.indexOf('badge removed') !== -1);
   assert.ok(elements['day-booth'].innerHTML.indexOf('booth-note') !== -1);
   assert.ok(elements['day-booth'].innerHTML.indexOf('Banks 2 yard run, TOUCHDOWN') !== -1);
+  // New score-risk highlight: a pending review on a touchdown shows
+  // "SCORE AT RISK", and a confirmed review shows "POINTS STOOD".
+  assert.ok(elements['day-booth'].innerHTML.indexOf('badge risk') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('SCORE AT RISK') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('booth-risk-note') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('POINTS STOOD') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('risk-possible') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('risk-stood') !== -1);
   const scoreboardWritesBeforeResolution = elements['scoreboard-view'].innerHTMLWrites();
 
   // Two review ticks while one detail request is pending still create one fetch.
@@ -295,6 +351,42 @@ async function run() {
   assert.ok(elements['day-booth'].innerHTML.indexOf('&#128276; Sound On') !== -1);
   assert.ok(audio.oscillatorCount > 1, 're-enabling the sound plays the preview buzz again');
 
+  // Open the game: the Play-by-Play tab highlights the scoring play that was
+  // called back, the scoring play that is at risk, and the confirmed review.
+  holdSummaries = false; // earlier steps intentionally held this request
+  elements['scoreboard-view'].dispatch('click', {
+    target: {
+      closest: function (selector) {
+        return selector === '.game-card'
+          ? { getAttribute: function () { return '401873286'; } }
+          : null;
+      }
+    }
+  });
+  await flush();
+  await flush();
+  assert.ok(elements['game-content'].innerHTML.indexOf('SCORING PLAY CALLED BACK') !== -1);
+  assert.ok(elements['game-content'].innerHTML.indexOf('SCORING PLAY AT RISK') !== -1);
+  assert.ok(elements['game-content'].innerHTML.indexOf('POINTS STOOD') !== -1);
+  assert.ok(elements['game-content'].innerHTML.indexOf('score-risk-possible') !== -1);
+  assert.ok(elements['game-content'].innerHTML.indexOf('score-risk-removed') !== -1);
+  assert.ok(elements['game-content'].innerHTML.indexOf('score-risk-stood') !== -1);
+
+  // The per-game Flags & Reviews tab carries the same risk classes and badges.
+  elements['tabs'].dispatch('click', {
+    target: {
+      closest: function (selector) {
+        return selector === '.tab'
+          ? { getAttribute: function () { return 'booth'; } }
+          : null;
+      }
+    }
+  });
+  assert.ok(elements['game-content'].innerHTML.indexOf('risk-possible') !== -1);
+  assert.ok(elements['game-content'].innerHTML.indexOf('risk-removed') !== -1);
+  assert.ok(elements['game-content'].innerHTML.indexOf('risk-stood') !== -1);
+  assert.ok(elements['game-content'].innerHTML.indexOf('SCORE AT RISK') !== -1);
+
   console.log('NFL scoreboard app smoke test');
   console.log('  ✓ live details use the 1-second timer');
   console.log('  ✓ overlapping detail requests are deduplicated');
@@ -306,6 +398,8 @@ async function run() {
   console.log('  ✓ idle final-game ticks do not rebuild an unchanged booth feed');
   console.log('  ✓ live review content renders from the supplied API-shaped payload');
   console.log('  ✓ the booth sound button toggles and plays the alert buzz');
+  console.log('  ✓ score-risk highlight: possible / removed / stood badges render');
+  console.log('  ✓ play-by-play marks called-back and at-risk scoring plays');
 }
 
 run().catch(function (err) {
