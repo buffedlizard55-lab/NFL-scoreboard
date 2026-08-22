@@ -185,6 +185,7 @@ main {
 .badge.result.overturned { background: #fff4d6; color: #92400e; }
 .badge.result.confirmed, .badge.result.stands { background: #e9f6ee; color: var(--win); }
 .badge.result.declined, .badge.result.offsetting { background: #eef1f5; color: var(--ink-2); }
+.badge.removed { background: #fff4d6; color: #92400e; }
 .badge .st-sub { font-weight: 600; margin-left: 4px; }
 
 .card-top { gap: 8px; flex-wrap: wrap; }
@@ -648,6 +649,39 @@ button:focus-visible {
   line-height: 1.45;
   color: var(--ink);
 }
+.booth-state {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.booth-state.removed { border-top-color: #fcd34d; }
+.bsh-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  color: var(--ink-2);
+}
+.bsh-before, .bsh-during, .bsh-after {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.bsh-after.removed { color: #b45309; }
+.bsh-arrow { color: #c4c9d2; }
+.booth-note {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+.day-msg .booth-state { background: #f6f8fb; border-radius: 8px; padding: 6px 8px; }
 
 /* -------------------------------- footer -------------------------------- */
 .footer {

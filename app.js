@@ -690,6 +690,7 @@
     }).length;
     const foot =
       'Every flag &amp; review from all of today&rsquo;s games · pulled from ESPN play-by-play · ' +
+      'tracks score before &rarr; during &rarr; after when a flag/review removes points · ' +
       LIVE_REVIEW_SECONDS + 's live polling schedule' +
       (scannable ? ' · games scanned ' + scanned + ' of ' + scannable : '') +
       (liveCount ? ' · ' + liveCount + ' game' + (liveCount === 1 ? '' : 's') + ' live' : '');
@@ -719,13 +720,49 @@
     '</div>';
   }
 
+  function scorePair(away, home) {
+    return String(away != null ? away : 0) + '–' + String(home != null ? home : 0);
+  }
+
+  function boothScoreTrailHTML(e, awayAbbr, homeAbbr) {
+    if (e.beforeAwayScore == null || e.duringAwayScore == null || e.afterAwayScore == null) return '';
+    const before = scorePair(e.beforeAwayScore, e.beforeHomeScore);
+    const during = scorePair(e.duringAwayScore, e.duringHomeScore);
+    const after = scorePair(e.afterAwayScore, e.afterHomeScore);
+    const removedAbbr = e.removedTeam === 'away' ? awayAbbr
+      : (e.removedTeam === 'home' ? homeAbbr : '');
+    const removedBadge = e.removesPoints
+      ? '<span class="badge removed">' +
+          (removedAbbr ? esc(removedAbbr) + ' ' : '') +
+          '&minus;' + esc(e.pointsRemoved) + ' PTS</span>'
+      : '';
+    const related = e.removesPoints && e.relatedScoringPlay && e.relatedScoringPlay.text
+      ? '<span class="booth-note">' + esc(e.relatedScoringPlay.text) + '</span>'
+      : '';
+    return '<span class="booth-state' + (e.removesPoints ? ' removed' : '') + '">' +
+      '<span class="bsh-label">Score</span>' +
+      '<span class="bsh-before">' + esc(before) + '</span>' +
+      '<span class="bsh-arrow">&#8594;</span>' +
+      '<span class="bsh-during">' + esc(during) + '</span>' +
+      '<span class="bsh-arrow">&#8594;</span>' +
+      '<span class="bsh-after' + (e.removesPoints ? ' removed' : '') + '">' + esc(after) + '</span>' +
+      removedBadge +
+    '</span>' +
+    related;
+  }
+
   function dayBoothMsgHTML(e, liveNow) {
     const q = NFLMap.quarterLabel(e.quarter);
     const when = [q, e.clock].filter(Boolean).join(' · ');
     const kind = BOOTH_KIND_LABEL[e.kind] || e.kind;
     const result = e.result ? BOOTH_RESULT_LABEL[e.result] || e.result : '';
-    const score = (e.awayScore != null && e.homeScore != null)
-      ? esc(e.awayAbbr) + ' ' + esc(e.awayScore) + '–' + esc(e.homeScore) + ' ' + esc(e.homeAbbr)
+    const duringScore = (e.duringAwayScore != null && e.duringHomeScore != null)
+      ? scorePair(e.duringAwayScore, e.duringHomeScore)
+      : ((e.awayScore != null && e.homeScore != null)
+        ? scorePair(e.awayScore, e.homeScore)
+        : '');
+    const score = duringScore
+      ? esc(e.awayAbbr) + ' ' + esc(duringScore) + ' ' + esc(e.homeAbbr)
       : '';
     const logo = e.team && e.team.logo
       ? '<img class="logo" src="' + esc(e.team.logo) + '" alt="">'
@@ -737,7 +774,9 @@
       ? '<span class="booth-dd">' + esc(e.downDistance) + '</span>'
       : '';
     const liveTag = liveNow ? '<span class="badge live">LIVE</span>' : '';
+    const state = boothScoreTrailHTML(e, e.awayAbbr, e.homeAbbr);
     const aria = esc(e.shortName) + ', ' + esc(kind) + ': ' + esc(e.text) +
+      (e.removesPoints ? ', removed ' + esc(e.pointsRemoved) + ' points' : '') +
       '. Open this game.';
     return '' +
       '<button type="button" class="booth-msg day-msg ' + esc(e.kind) +
@@ -754,6 +793,7 @@
           '<span class="booth-heading">' + esc(e.heading) + '</span>' + dd +
         '</span>' +
         '<span class="booth-text">' + esc(e.text) + '</span>' +
+        state +
       '</button>';
   }
 
@@ -982,8 +1022,9 @@
 
     const live = current() && current().status && current().status.state === 'in';
     const foot = live
-      ? 'Live booth log · pulled from ESPN play-by-play · ' + LIVE_REVIEW_SECONDS + 's polling schedule'
-      : 'Booth log · pulled from ESPN play-by-play';
+      ? 'Live booth log · pulled from ESPN play-by-play · tracks score before &rarr; during &rarr; after when points are removed · ' +
+        LIVE_REVIEW_SECONDS + 's polling schedule'
+      : 'Booth log · pulled from ESPN play-by-play · tracks score before &rarr; during &rarr; after when points are removed';
 
     return '<div class="booth">' +
       '<div class="booth-head">' +
@@ -1001,9 +1042,12 @@
     const when = [q, e.clock].filter(Boolean).join(' · ');
     const kind = BOOTH_KIND_LABEL[e.kind] || e.kind;
     const result = e.result ? BOOTH_RESULT_LABEL[e.result] || e.result : '';
-    const score = (e.awayScore != null && e.homeScore != null)
-      ? esc(e.awayScore) + '–' + esc(e.homeScore)
-      : '';
+    const duringScore = (e.duringAwayScore != null && e.duringHomeScore != null)
+      ? scorePair(e.duringAwayScore, e.duringHomeScore)
+      : ((e.awayScore != null && e.homeScore != null)
+        ? scorePair(e.awayScore, e.homeScore)
+        : '');
+    const score = duringScore ? esc(duringScore) : '';
     const logo = e.team && e.team.logo
       ? '<img class="logo" src="' + esc(e.team.logo) + '" alt="">'
       : '';
@@ -1014,6 +1058,10 @@
       ? '<span class="booth-dd">' + esc(e.downDistance) + '</span>'
       : '';
     const liveTag = e.live ? '<span class="badge live">LIVE</span>' : '';
+    const game = current();
+    const awayAbbr = game && game.away ? game.away.abbr : '';
+    const homeAbbr = game && game.home ? game.home.abbr : '';
+    const state = boothScoreTrailHTML(e, awayAbbr, homeAbbr);
     return '' +
       '<article class="booth-msg ' + esc(e.kind) + (isNew ? ' new' : '') + '">' +
         '<div class="booth-msg-top">' +
@@ -1027,6 +1075,7 @@
           '<span class="booth-heading">' + esc(e.heading) + '</span>' + dd +
         '</div>' +
         '<p class="booth-text">' + esc(e.text) + '</p>' +
+        state +
       '</article>';
   }
 

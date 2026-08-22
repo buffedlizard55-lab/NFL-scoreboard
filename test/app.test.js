@@ -76,6 +76,38 @@ async function run() {
 
   const summary = JSON.parse(JSON.stringify(sample.summary));
   summary.header = { competitions: [{ situation: competition.situation }] };
+  // Add an API-shaped reversed-TD sequence so the booth smoke test also
+  // exercises the new before/during/after + points-removed rendering.
+  summary.drives.previous.push({
+    id: 'reversed-td-drive',
+    description: 'fixture: reversed touchdown',
+    result: 'No Play',
+    displayResult: 'No Play',
+    isScore: false,
+    team: { abbreviation: 'HOU', displayName: 'Houston Texans', logos: [] },
+    plays: [
+      {
+        id: 'rev-1', sequenceNumber: '1000', type: { text: 'Rush' },
+        text: 'J.Banks 2 yard run, TOUCHDOWN.', awayScore: 0, homeScore: 7,
+        scoringPlay: true, isPenalty: false
+      },
+      {
+        id: 'rev-2', sequenceNumber: '1100', type: { text: 'Pass Reception' },
+        text: 'Play under review.', awayScore: 0, homeScore: 7,
+        scoringPlay: false, isPenalty: false
+      },
+      {
+        id: 'rev-3', sequenceNumber: '1200', type: { text: 'Replay Review' },
+        text: 'The replay official reviewed the ruling, and the play was REVERSED. Runner short of the goal line.',
+        awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false
+      },
+      {
+        id: 'rev-4', sequenceNumber: '1300', type: { text: 'Rush' },
+        text: 'J.Banks left tackle for no gain.', awayScore: 0, homeScore: 0,
+        scoringPlay: false, isPenalty: false
+      }
+    ]
+  });
 
   function response(json) {
     return { ok: true, status: 200, json: function () { return Promise.resolve(json); } };
@@ -133,6 +165,13 @@ async function run() {
   assert.ok(fetchOptions.every(function (options) { return options && options.cache === 'no-store'; }));
   assert.ok(elements['day-booth'].innerHTML.indexOf('Play under review.') !== -1);
   assert.ok(elements['day-booth'].innerHTML.indexOf('1s live polling schedule') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('booth-state') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('bsh-label') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('Score') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('booth-state removed') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('badge removed') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('booth-note') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('Banks 2 yard run, TOUCHDOWN') !== -1);
   const scoreboardWritesBeforeResolution = elements['scoreboard-view'].innerHTMLWrites();
 
   // Two review ticks while one detail request is pending still create one fetch.
