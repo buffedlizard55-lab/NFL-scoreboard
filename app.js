@@ -321,11 +321,19 @@
     const sub = st.sub ? ' <span class="st-sub">' + esc(st.sub) + '</span>' : '';
     const bcast = ev.broadcast ? '<span class="card-bcast">' + esc(ev.broadcast) + '</span>' : '';
     const liveBooth = lastPlayBooth(ev);
-    const reviewBadge = (liveBooth && liveBooth.kind === 'review')
-      ? '<span class="badge review">REVIEW</span>'
-      : '';
+    let reviewBadge = '';
+    if (liveBooth && liveBooth.scoreRisk === 'possible') {
+      reviewBadge = '<span class="badge risk">SCORE AT RISK</span>';
+    } else if (liveBooth && liveBooth.scoreRisk === 'removed') {
+      reviewBadge = '<span class="badge removed">PTS OFF</span>';
+    } else if (liveBooth && liveBooth.kind === 'review') {
+      reviewBadge = '<span class="badge review">REVIEW</span>';
+    }
     const aria = esc(away.abbr) + ' at ' + esc(home.abbr) + ', ' + esc(st.text) +
       (away.score !== '' && home.score !== '' ? ', ' + esc(away.score) + ' to ' + esc(home.score) : '') +
+      (liveBooth && liveBooth.scoreRisk === 'possible'
+        ? ', scoring play at risk of losing points'
+        : (liveBooth && liveBooth.scoreRisk === 'removed' ? ', points were removed' : '')) +
       '. Open game details.';
     return '' +
       '<article class="game-card" data-id="' + esc(ev.id) + '" tabindex="0" role="button" aria-label="' + aria + '">' +
@@ -400,6 +408,11 @@
     $('live-indicator').classList.toggle('hidden', !live);
   }
 
+  /*
+   * The booth state of a game's latest play, including whether that play is
+   * anchored to a scoring play that could lose points (scoreRisk). Used for
+   * the REVIEW / SCORE AT RISK / PTS OFF badges on game cards.
+   */
   function lastPlayBooth(ev) {
     const cached = ev && state.daySummaries[ev.id];
     const cachedPlay = cached && cached.situation && cached.situation.lastPlay;
@@ -407,7 +420,27 @@
     if (!lp) return null;
     const kind = NFLMap.classifyBooth(lp);
     if (!kind) return null;
-    return { kind: kind, play: lp, text: lp.text || lp.shortText || '' };
+    const events = NFLMap.boothEvents(cached && cached.drives, lp);
+    let live = null;
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const e = events[i];
+      if (lp.id != null && e.id != null && String(e.id) === String(lp.id)) {
+        live = e;
+        break;
+      }
+      if (e.live) {
+        live = e;
+        break;
+      }
+    }
+    if (!live) {
+      return { kind: kind, scoreRisk: '', text: lp.text || lp.shortText || '' };
+    }
+    return {
+      kind: live.kind || kind,
+      scoreRisk: live.scoreRisk || '',
+      text: live.text || lp.text || lp.shortText || ''
+    };
   }
 
   /* ----------------------- day-wide live booth chat ---------------------- */
@@ -502,10 +535,14 @@
           .then(function (json) {
             if (toYMD(state.date) !== stamp) return; // the user moved on
             const priorBooth = lastPlayBooth(ev);
-            const hadReviewBadge = !!(priorBooth && priorBooth.kind === 'review');
+            const hadCardBadge = priorBooth
+              ? priorBooth.kind + ':' + (priorBooth.scoreRisk || '')
+              : '';
             cacheDaySummary(ev.id, json, request.final);
             const nextBooth = lastPlayBooth(ev);
-            const hasReviewBadge = !!(nextBooth && nextBooth.kind === 'review');
+            const hasCardBadge = nextBooth
+              ? nextBooth.kind + ':' + (nextBooth.scoreRisk || '')
+              : '';
 
             const open = current();
             if (open && open.id === ev.id) {
@@ -521,9 +558,10 @@
                 state.lastGameContentRenderAt = now;
               }
             }
-            // Summary data only affects the card's REVIEW badge; avoid rebuilding
-            // every card on each one-second tick when that badge did not change.
-            if (hadReviewBadge !== hasReviewBadge &&
+            // Summary data only affects the card's REVIEW / SCORE AT RISK /
+            // PTS OFF badge; avoid rebuilding every card on each one-second
+            // tick when that badge did not change.
+            if (hadCardBadge !== hasCardBadge &&
                 !$('scoreboard-view').classList.contains('hidden')) {
               renderScoreboard();
             }
@@ -721,7 +759,7 @@
     }).length;
     const foot =
       'Every flag &amp; review from all of today&rsquo;s games · pulled from ESPN play-by-play · ' +
-      'tracks score before &rarr; during &rarr; after when a flag/review removes points · ' +
+      'highlights flags, challenges &amp; reviews on scoring plays that may lose points · ' +
       LIVE_REVIEW_SECONDS + 's live polling schedule' +
       (scannable ? ' · games scanned ' + scanned + ' of ' + scannable : '') +
       (liveCount ? ' · ' + liveCount + ' game' + (liveCount === 1 ? '' : 's') + ' live' : '');
@@ -766,6 +804,13 @@
     return String(away != null ? away : 0) + '–' + String(home != null ? home : 0);
   }
 
+  /*
+   * Score trail + score-risk highlight for a booth event.
+   *   possible -> an amber "SCORE AT RISK" badge (points may be taken off)
+   *   removed  -> the measured "-N PTS" badge, or "PTS OFF - VERIFY" when
+   *               ESPN published the reversal but not yet the new score
+   *   stood    -> a green "POINTS STOOD" badge (review cleared the score)
+   */
   function boothScoreTrailHTML(e, awayAbbr, homeAbbr) {
     if (e.beforeAwayScore == null || e.duringAwayScore == null || e.afterAwayScore == null) return '';
     const before = scorePair(e.beforeAwayScore, e.beforeHomeScore);
@@ -776,10 +821,20 @@
     const removedBadge = e.removesPoints
       ? '<span class="badge removed">' +
           (removedAbbr ? esc(removedAbbr) + ' ' : '') +
-          '&minus;' + esc(e.pointsRemoved) + ' PTS</span>'
+          '&minus;' + esc(e.pointsRemoved) + ' PTS REMOVED</span>'
       : '';
-    const related = e.removesPoints && e.relatedScoringPlay && e.relatedScoringPlay.text
-      ? '<span class="booth-note">' + esc(e.relatedScoringPlay.text) + '</span>'
+    const risk = e.scoreRisk || '';
+    const riskBadge =
+      risk === 'possible'
+        ? '<span class="badge risk">&#9888; SCORE AT RISK</span>'
+        : (risk === 'removed' && !e.removesPoints)
+          ? '<span class="badge risk">&#9888; PTS OFF &mdash; VERIFY</span>'
+          : (risk === 'stood' ? '<span class="badge stood">POINTS STOOD</span>' : '');
+    const riskNote = risk && risk !== 'none' && e.scoreRiskReason
+      ? '<div class="booth-risk-note">' + esc(e.scoreRiskReason) + '</div>'
+      : '';
+    const related = risk && risk !== 'none' && e.relatedScoringPlay && e.relatedScoringPlay.text
+      ? '<span class="booth-note">Scoring play: ' + esc(e.relatedScoringPlay.text) + '</span>'
       : '';
     return '<span class="booth-state' + (e.removesPoints ? ' removed' : '') + '">' +
       '<span class="bsh-label">Score</span>' +
@@ -788,8 +843,9 @@
       '<span class="bsh-during">' + esc(during) + '</span>' +
       '<span class="bsh-arrow">&#8594;</span>' +
       '<span class="bsh-after' + (e.removesPoints ? ' removed' : '') + '">' + esc(after) + '</span>' +
-      removedBadge +
+      removedBadge + riskBadge +
     '</span>' +
+    riskNote +
     related;
   }
 
@@ -816,12 +872,15 @@
       ? '<span class="booth-dd">' + esc(e.downDistance) + '</span>'
       : '';
     const liveTag = liveNow ? '<span class="badge live">LIVE</span>' : '';
+    const riskCls = e.scoreRisk && e.scoreRisk !== 'none' ? ' risk-' + e.scoreRisk : '';
     const state = boothScoreTrailHTML(e, e.awayAbbr, e.homeAbbr);
     const aria = esc(e.shortName) + ', ' + esc(kind) + ': ' + esc(e.text) +
       (e.removesPoints ? ', removed ' + esc(e.pointsRemoved) + ' points' : '') +
+      (e.scoreRisk === 'possible' ? ', scoring play at risk of losing points' : '') +
+      (e.scoreRisk === 'stood' ? ', points were confirmed' : '') +
       '. Open this game.';
     return '' +
-      '<button type="button" class="booth-msg day-msg ' + esc(e.kind) +
+      '<button type="button" class="booth-msg day-msg ' + esc(e.kind) + riskCls +
         '" data-id="' + esc(e.gameId) + '" aria-label="' + aria + '">' +
         '<span class="booth-msg-top">' +
           '<span class="day-game">' + esc(e.shortName) + '</span>' +
@@ -1042,14 +1101,38 @@
 
     const lastPlay = liveLastPlay();
     const lastText = lastPlay ? (lastPlay.text || lastPlay.shortText || '') : '';
-    const livePending = !!(current() && current().status && current().status.state === 'in' && lastPlay &&
-      (NFLMap.classifyBooth(lastPlay) === 'review' || NFLMap.boothResult(lastText) === 'pending'));
-    const banner = livePending
-      ? '<div class="booth-banner" role="status">' +
-          '<span class="badge review">UNDER REVIEW</span>' +
-          '<span>' + esc(lastText) + '</span>' +
-        '</div>'
-      : '';
+    const lastEvent = (function () {
+      const id = lastPlay && lastPlay.id != null ? String(lastPlay.id) : '';
+      for (let i = events.length - 1; i >= 0; i -= 1) {
+        const e = events[i];
+        if (e.live) return e;
+        if (id && e.id != null && String(e.id) === id) return e;
+      }
+      return null;
+    })();
+    const banner = (function () {
+      if (!current() || current().status.state !== 'in' || !lastPlay) return '';
+      if (lastEvent && lastEvent.scoreRisk === 'possible') {
+        return '<div class="booth-banner risk" role="status">' +
+          '<span class="badge risk">&#9888; SCORE AT RISK</span>' +
+          '<span>' + esc(lastEvent.text || lastText) + '</span>' +
+        '</div>';
+      }
+      if (lastEvent && lastEvent.scoreRisk === 'removed') {
+        return '<div class="booth-banner risk" role="status">' +
+          '<span class="badge removed">PTS OFF</span>' +
+          '<span>' + esc(lastEvent.text || lastText) + '</span>' +
+        '</div>';
+      }
+      const pending = lastEvent
+        ? lastEvent.result === 'pending'
+        : (NFLMap.classifyBooth(lastPlay) === 'review' || NFLMap.boothResult(lastText) === 'pending');
+      if (!pending) return '';
+      return '<div class="booth-banner" role="status">' +
+        '<span class="badge review">UNDER REVIEW</span>' +
+        '<span>' + esc(lastText) + '</span>' +
+      '</div>';
+    })();
 
     let body;
     if (!visible.length) {
@@ -1064,9 +1147,9 @@
 
     const live = current() && current().status && current().status.state === 'in';
     const foot = live
-      ? 'Live booth log · pulled from ESPN play-by-play · tracks score before &rarr; during &rarr; after when points are removed · ' +
+      ? 'Live booth log · pulled from ESPN play-by-play · highlights flags, challenges &amp; reviews on scoring plays that may lose points · ' +
         LIVE_REVIEW_SECONDS + 's polling schedule'
-      : 'Booth log · pulled from ESPN play-by-play · tracks score before &rarr; during &rarr; after when points are removed';
+      : 'Booth log · pulled from ESPN play-by-play · highlights flags, challenges &amp; reviews on scoring plays that may lose points';
 
     return '<div class="booth">' +
       '<div class="booth-head">' +
@@ -1103,9 +1186,10 @@
     const game = current();
     const awayAbbr = game && game.away ? game.away.abbr : '';
     const homeAbbr = game && game.home ? game.home.abbr : '';
+    const riskCls = e.scoreRisk && e.scoreRisk !== 'none' ? ' risk-' + e.scoreRisk : '';
     const state = boothScoreTrailHTML(e, awayAbbr, homeAbbr);
     return '' +
-      '<article class="booth-msg ' + esc(e.kind) + (isNew ? ' new' : '') + '">' +
+      '<article class="booth-msg ' + esc(e.kind) + (isNew ? ' new' : '') + riskCls + '">' +
         '<div class="booth-msg-top">' +
           '<span class="booth-when">' + esc(when) + '</span>' +
           liveTag +
@@ -1123,11 +1207,40 @@
 
   /* ------------------------------- play by play -------------------------- */
 
+  /*
+   * Map each play id to its score-risk state for the Play-by-Play tab:
+   * booth plays get SCORE AT RISK / POINTS REMOVED / POINTS STOOD, and the
+   * scoring play they are anchored to gets CALLED BACK / AT RISK markers.
+   */
+  function playRiskById(drivesContainer) {
+    const byId = {};
+    const context = NFLMap.playsList(drivesContainer);
+    context.forEach(function (p, index) {
+      if (!NFLMap.classifyBooth(p)) return;
+      const risk = NFLMap.boothScoreRisk(context, index);
+      if (risk.risk === 'none') return;
+      const key = p.id != null ? String(p.id) : '';
+      if (key) byId[key] = risk;
+      const sp = risk.scoringPlay;
+      if (!sp) return;
+      if (risk.risk === 'removed' || risk.risk === 'possible') {
+        const spKey = sp.id != null ? String(sp.id) : '';
+        if (spKey) {
+          byId[spKey] = Object.assign({}, risk, {
+            marking: risk.risk === 'removed' ? 'called-back' : 'at-risk-play'
+          });
+        }
+      }
+    });
+    return byId;
+  }
+
   function playsHTML() {
     const drives = NFLMap.drivesList(state.summary.drives);
     if (!drives.length) {
       return '<div class="empty">Play-by-play is not available for this game.</div>';
     }
+    const riskById = playRiskById(state.summary.drives);
     let out = [];
     let lastQ = null;
     drives.forEach(function (d) {
@@ -1137,19 +1250,20 @@
         out.push('<h3 class="quarter">' + esc(ql) + '</h3>');
         lastQ = ql;
       }
-      out.push(driveSectionHTML(d));
+      out.push(driveSectionHTML(d, riskById));
     });
     return '<div class="pbp">' + out.join('') + '</div>';
   }
 
-  function driveSectionHTML(d) {
+  function driveSectionHTML(d, riskById) {
     const t = d.team || {};
     const logo = (t.logos && t.logos.length) ? t.logos[0].href : '';
     const result = d.displayResult
       ? '<span class="drive-result">' + esc(d.displayResult) + '</span>'
       : '';
     const rows = (d.plays || []).map(function (p) {
-      return playRowHTML(NFLMap.playRow(p));
+      const key = p.id != null ? String(p.id) : '';
+      return playRowHTML(NFLMap.playRow(p), key ? riskById[key] : null);
     }).join('');
     return '' +
       '<div class="drive">' +
@@ -1163,18 +1277,33 @@
       '</div>';
   }
 
-  function playRowHTML(p) {
+  function playRowHTML(p, risk) {
     const cls = [];
     if (p.scoring) cls.push('scoring');
     if (p.turnover) cls.push('turnover');
     if (p.penalty) cls.push('penalty');
+    let riskLabel = '';
+    if (risk && risk.risk === 'possible') {
+      cls.push('score-risk-possible');
+      riskLabel = risk.marking === 'at-risk-play'
+        ? '<span class="pbp-risk possible">SCORING PLAY AT RISK</span>'
+        : '<span class="pbp-risk possible">SCORE AT RISK</span>';
+    } else if (risk && risk.risk === 'removed') {
+      cls.push('score-risk-removed');
+      riskLabel = risk.marking === 'called-back'
+        ? '<span class="pbp-risk removed">SCORING PLAY CALLED BACK</span>'
+        : '<span class="pbp-risk removed">POINTS REMOVED</span>';
+    } else if (risk && risk.risk === 'stood') {
+      cls.push('score-risk-stood');
+      riskLabel = '<span class="pbp-risk stood">POINTS STOOD</span>';
+    }
     const yard = p.yardage != null ? '<span class="yds">' + esc(p.yardage) + ' yds</span>' : '';
     const pen = p.penaltyText ? ' <span class="pen">(' + esc(p.penaltyText) + ')</span>' : '';
     return '' +
       '<tr class="' + cls.join(' ') + '">' +
         '<td class="dd">' + esc(p.downDistance) + '</td>' +
         '<td class="clock">' + esc(p.clock) + '</td>' +
-        '<td class="desc">' + esc(p.text) + pen + yard + '</td>' +
+        '<td class="desc">' + esc(p.text) + pen + yard + riskLabel + '</td>' +
         '<td class="score">' + esc(p.awayScore) + '–' + esc(p.homeScore) + '</td>' +
       '</tr>';
   }

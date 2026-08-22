@@ -46,11 +46,25 @@ the repository root — no build step:
   type and result, quarter & clock, and the play text, and can be filtered by
   kind (All / Flags / Challenges / Replay / Under review). New messages appear
   at the bottom as the feed discovers them, and clicking one opens that game's
-  own **Flags & Reviews** tab. The scoreboard also keeps a **REVIEW** badge on
-  a game card while its last play is under review. Booth events also show the
-  **score before → during → after** the event and badge the events that
-  **removed points** (for example, a touchdown taken away by an offensive
-  penalty or a replay reversal), including the scoring play that was nullified.
+  own **Flags & Reviews** tab. The scoreboard also keeps a badge on a game
+  card while its last play is under review: **REVIEW** while a review is
+  pending, **SCORE AT RISK** when the play is tied to a scoring play that
+  could still lose points, and **PTS OFF** once points were taken away.
+  Booth events show the **score before → during → after** the event and are
+  highlighted by score risk:
+  - **⚠ SCORE AT RISK** — a flag, penalty, challenge, replay, or review is on
+    a scoring play, so the points may be taken off. This is shown live as soon
+    as the flag/review appears, before ESPN publishes the corrected score.
+  - **−N PTS REMOVED** — the running score actually dropped (e.g. a touchdown
+    erased by an offensive penalty or a TD ruled then reversed by replay),
+    including the scoring play that was nullified; **PTS OFF — VERIFY** is
+    shown when a reversal is published but the corrected score has not arrived.
+  - **POINTS STOOD** — the review/penalty resolved and the points remain
+    (confirmed, upheld, stands, or declined), so the at-risk state is cleared.
+  The same badges appear in the per-game **Flags & Reviews** tab, the
+  Play-by-Play tab marks the affected plays (**SCORE AT RISK**, **POINTS
+  REMOVED**, **SCORING PLAY CALLED BACK**, **POINTS STOOD**), and the game
+  card carries the badge while the situation is live.
   The booth header has a **sound toggle button** (🔔 Sound On / 🔇 Sound Off)
   like the MLB replay feed: it is ON by default so automatic alerts keep
   working as before, and each click plays the exact same 3-second alert buzz
@@ -66,9 +80,11 @@ the repository root — no build step:
     ESPN play-by-play on a 1-second schedule while a game is live. If the same
     classified play arrives with a changed review result, its existing message
     is updated in place. Each entry tracks the running score **before →
-    during → after** the flag/review/challenge, flags events that **removed
-    points** (e.g. a 5-yard TD erased by an offensive penalty or a TD
-    reversed by replay), and names the scoring play that was nullified.
+    during → after** the flag/review/challenge and is highlighted by score
+    risk: **SCORE AT RISK** (points may still be taken off), **PTS REMOVED**
+    (e.g. a 5-yard TD erased by an offensive penalty or a TD reversed by
+    replay, naming the scoring play that was nullified), or **POINTS STOOD**
+    (confirmed/upheld/declined — the points stay).
   - **Scoring Drives** — each scoring drive with team, result, plays / yards /
     time, and the score after the play (NFL.com's "Scoring Drives" style).
   - **Team Stats** — full team box score comparison (first downs, total yards,
@@ -135,22 +151,29 @@ npm test
 This validates score/team/linescore extraction, team stats, player stat
 categories (passing, rushing, …), play-by-play flattening & ordering, scoring
 drives, quarter labels, booth classification (flags / challenges / replay /
-under review), booth before/during/after score tracking and called-back-score
-detection, day-wide feed merging / attribution / dedupe, in-place review
-result updates, null-safety, the 15-second/1-second polling cadences, visibility
-gating, immediate refresh, timer cleanup, browser-app wiring, request dedupe,
-the booth sound button (renders, toggles, and triggers the alert buzz), and
-rendering against an injected API-shaped payload.
+under review), booth before/during/after score tracking, called-back-score
+detection, **score-removal risk** (pending review on a TD → `possible`,
+reversal → `removed`, confirmed/upheld/declined → `stood`, mid-drive reviews
+and unrelated flags → `none`), day-wide feed merging / attribution / dedupe,
+in-place review result updates, null-safety, the 15-second/1-second polling
+cadences, visibility gating, immediate refresh, timer cleanup, browser-app
+wiring, request dedupe, the booth sound button (renders, toggles, and triggers
+the alert buzz), and rendering against an injected API-shaped payload.
 
 The booth feed does **not** call or invent a separate reviews endpoint. It
 classifies the play records returned by the summary endpoint using fields
 present in those records (`isPenalty`, `penalty.yards`, `penalty.type.text`,
 `type.text`, `text`) and tested description phrases such as "PENALTY on …",
 "The replay official reviewed…", "challenged the…", and "Play under review."
-The before/during/after score tracking and `points removed` badge also use
-only the per-play running scores already returned by ESPN
-(`awayScore` / `homeScore`); an event is reported as removing points only when
-that running score actually drops, so the app does not invent corrections.
+The before/during/after score tracking and `points removed` badge use only
+the per-play running scores already returned by ESPN (`awayScore` /
+`homeScore`); an event is reported as removing points only when that running
+score actually drops. The **SCORE AT RISK** state is deliberately more
+conservative: it is only shown when the event is anchored to a scoring play
+(the event updates that scoring play in place, or it sits in a contiguous
+chain of flag/review records directly after the score), so ordinary
+mid-drive reviews and unrelated flags are never highlighted as risking
+points.
 
 ## Notes & limits
 
