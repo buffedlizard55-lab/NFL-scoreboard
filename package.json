@@ -5,6 +5,6 @@
   "description": "Clean NFL scoreboard with play-by-play, team stats and player stats (ESPN public API).",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/mapping.test.js"
+    "test": "node test/mapping.test.js && node test/refresh.test.js && node test/app.test.js"
   }
 }

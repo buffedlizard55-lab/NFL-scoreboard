@@ -10,6 +10,7 @@
 
   const SCOREBOARD_URL = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard';
   const SUMMARY_URL = 'https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/summary';
+  const LIVE_REVIEW_SECONDS = NFLRefresh.LIVE_REVIEWS_INTERVAL_MS / 1000;
 
   const TABS = [
     { id: 'plays', label: 'Play-by-Play' },
@@ -81,14 +82,15 @@
     eventIndex: -1,        // open game within state.events
     summary: null,         // raw summary JSON for the open game
     activeTab: 'plays',
+    lastGameContentRenderAt: 0, // preserve the old 5s cadence outside the booth tab
     boothFilter: 'all',    // all | penalty | challenge | replay | review
     seenBoothIds: {},      // play ids already shown in the booth feed
     boothPrimed: false,    // first paint of a game's booth marks history as seen
-    daySummaries: {},      // eventId -> { drives } for every played game of the day
-    dayBoothFetching: {},  // eventId -> true while its summary is in flight
-    dayFeed: { items: [], seen: {}, primed: false }, // day-wide booth chat feed
+    daySummaries: {},      // eventId -> { drives, situation, final }
+    summaryRequests: {},   // eventId -> { promise, final } for an in-flight fetch
+    dayFeed: { items: [], primed: false }, // day-wide booth chat feed
     dayBoothFilter: 'all', // filter for the day-wide booth chat
-    pollTimer: null
+    polling: null
   };
 
   function $(id) { return document.getElementById(id); }
@@ -223,7 +225,9 @@
   /* ------------------------------ scoreboard ----------------------------- */
 
   function fetchScoreboard(d) {
-    return fetch(SCOREBOARD_URL + '?dates=' + encodeURIComponent(toYMD(d || state.date)))
+    return fetch(SCOREBOARD_URL + '?dates=' + encodeURIComponent(toYMD(d || state.date)), {
+      cache: 'no-store'
+    })
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -260,7 +264,6 @@
         renderScoreboard();
         updateWeekLabel();
         updateLiveIndicator();
-        refreshDayBooth();
         if (state.eventIndex >= 0) {
           renderGameHeader();
           if (state.activeTab === 'booth' && state.summary) renderTabContent();
@@ -394,7 +397,9 @@
   }
 
   function lastPlayBooth(ev) {
-    const lp = ev && ev.situation && ev.situation.lastPlay;
+    const cached = ev && state.daySummaries[ev.id];
+    const cachedPlay = cached && cached.situation && cached.situation.lastPlay;
+    const lp = cachedPlay || (ev && ev.situation && ev.situation.lastPlay);
     if (!lp) return null;
     const kind = NFLMap.classifyBooth(lp);
     if (!kind) return null;
@@ -407,8 +412,7 @@
    * game of the selected day. It is built from the same two verified
    * sources as a game's own Flags & Reviews tab:
    *   - each played game's summary play-by-play (summary.drives), and
-   *   - each game's latest play from the scoreboard feed (situation.lastPlay),
-   *     which ESPN only includes while a game is live.
+   *   - each game's latest play from the summary or scoreboard situation.
    * Messages are kept in discovery order (games are seeded in kickoff
    * order; newly discovered messages are appended at the bottom), so it
    * reads like a chat. No per-play timestamps are invented: ordering is by
@@ -416,12 +420,41 @@
    * games.
    */
 
-  function fetchSummaryQuiet(id) {
-    return fetch(SUMMARY_URL + '?event=' + encodeURIComponent(id))
-      .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      });
+  function summarySituation(summary) {
+    const competitions = summary && summary.header && summary.header.competitions;
+    const competition = competitions && competitions[0];
+    return (competition && competition.situation) || null;
+  }
+
+  /* Share one request when the day feed and an open game need the same JSON. */
+  function fetchSummaryQuiet(id, isFinalSnapshot) {
+    if (state.summaryRequests[id]) return state.summaryRequests[id];
+
+    const entry = {
+      final: !!isFinalSnapshot,
+      promise: fetch(SUMMARY_URL + '?event=' + encodeURIComponent(id), {
+        cache: 'no-store'
+      })
+        .then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+    };
+    state.summaryRequests[id] = entry;
+
+    function clearRequest() {
+      if (state.summaryRequests[id] === entry) delete state.summaryRequests[id];
+    }
+    entry.promise.then(clearRequest, clearRequest);
+    return entry;
+  }
+
+  function cacheDaySummary(id, json, isFinal) {
+    state.daySummaries[id] = {
+      drives: json.drives || null,
+      situation: summarySituation(json),
+      final: !!isFinal
+    };
   }
 
   function dayBoothGames() {
@@ -441,8 +474,9 @@
 
   /*
    * Fetch the play-by-play of every game that has (or had) action:
-   * live games on every cycle, finished games once per selected day.
-   * Each response re-renders the feed as it arrives.
+   * live games on every one-second review cycle, then one final snapshot after
+   * the scoreboard reports the game as finished. Each response updates cached
+   * data and the review feeds; larger non-review tabs repaint at most every 5s.
    */
   function refreshDayBooth() {
     if (!state.events.length) {
@@ -453,22 +487,50 @@
     const jobs = [];
     state.events.forEach(function (ev) {
       if (!ev.id || !dayBoothScannable(ev)) return;
-      if (state.dayBoothFetching[ev.id]) return; // already in flight
+      if (state.summaryRequests[ev.id]) return;
       const st = ev.status && ev.status.state;
-      if (st === 'post' && state.daySummaries[ev.id]) return; // finals are cached
-      state.dayBoothFetching[ev.id] = true;
+      const cached = state.daySummaries[ev.id];
+      if (st === 'post' && cached && cached.final) return;
+
+      const request = fetchSummaryQuiet(ev.id, st === 'post');
       jobs.push(
-        fetchSummaryQuiet(ev.id)
+        request.promise
           .then(function (json) {
             if (toYMD(state.date) !== stamp) return; // the user moved on
-            state.daySummaries[ev.id] = { drives: json.drives || null };
+            const priorBooth = lastPlayBooth(ev);
+            const hadReviewBadge = !!(priorBooth && priorBooth.kind === 'review');
+            cacheDaySummary(ev.id, json, request.final);
+            const nextBooth = lastPlayBooth(ev);
+            const hasReviewBadge = !!(nextBooth && nextBooth.kind === 'review');
+
+            const open = current();
+            if (open && open.id === ev.id) {
+              state.summary = json;
+              // Reviews render on every response. Other large tabs retain their
+              // prior five-second paint cadence to avoid one-second DOM churn.
+              const now = Date.now();
+              const shouldRenderGame = NFLRefresh.shouldRenderGameContent(
+                state.activeTab, state.lastGameContentRenderAt, now);
+              if (shouldRenderGame) {
+                renderGameHeader();
+                renderTabContent();
+                state.lastGameContentRenderAt = now;
+              }
+            }
+            // Summary data only affects the card's REVIEW badge; avoid rebuilding
+            // every card on each one-second tick when that badge did not change.
+            if (hadReviewBadge !== hasReviewBadge &&
+                !$('scoreboard-view').classList.contains('hidden')) {
+              renderScoreboard();
+            }
             renderDayBooth();
           })
           .catch(function () { /* keep last good data on transient failure */ })
-          .then(function () { delete state.dayBoothFetching[ev.id]; })
       );
     });
-    if (!jobs.length) renderDayBooth();
+    // Paint an empty/loading feed once, but do not rebuild an unchanged feed on
+    // every one-second tick when there is no request to make.
+    if (!jobs.length && !state.dayFeed.primed) renderDayBooth();
   }
 
   function renderDayBooth() {
@@ -478,8 +540,8 @@
       el.classList.add('hidden');
       return;
     }
-    // Keep the section hidden while the game view is open (the 15s refresh
-    // still updates its content, it just must not reappear underneath).
+    // Keep the section hidden while the game view is open (background refresh
+    // still updates its content, but it must not reappear underneath).
     if ($('scoreboard-view').classList.contains('hidden')) {
       el.classList.add('hidden');
     } else {
@@ -488,7 +550,8 @@
 
     const fresh = NFLMap.dayBoothFeed(dayBoothGames().map(function (ev) {
       const cached = state.daySummaries[ev.id] || null;
-      const lastPlay = (ev.situation && ev.situation.lastPlay) || null;
+      const cachedPlay = cached && cached.situation && cached.situation.lastPlay;
+      const lastPlay = cachedPlay || (ev.situation && ev.situation.lastPlay) || null;
       return {
         id: ev.id,
         shortName: ev.shortName ||
@@ -501,19 +564,13 @@
       };
     }));
 
-    // Chat semantics: never drop messages discovered for this day — append
-    // the newly discovered ones at the bottom of the feed.
-    const seen = state.dayFeed.seen;
+    // Keep discovery order, append new messages, and replace an existing item
+    // when ESPN updates that same play with the review result.
     if (!state.dayFeed.primed) {
       state.dayFeed.items = fresh;
       state.dayFeed.primed = true;
-      fresh.forEach(function (it) { seen[it.key] = true; });
     } else {
-      fresh.forEach(function (it) {
-        if (seen[it.key]) return;
-        seen[it.key] = true;
-        state.dayFeed.items.push(it);
-      });
+      state.dayFeed.items = NFLMap.reconcileDayBoothFeed(state.dayFeed.items, fresh);
     }
 
     const feed = el.querySelector('.day-feed');
@@ -573,7 +630,8 @@
       return e.status && e.status.state === 'in';
     }).length;
     const foot =
-      'Every flag &amp; review from all of today&rsquo;s games · pulled from ESPN play-by-play · refreshes every 15s' +
+      'Every flag &amp; review from all of today&rsquo;s games · pulled from ESPN play-by-play · ' +
+      LIVE_REVIEW_SECONDS + 's live polling schedule' +
       (scannable ? ' · games scanned ' + scanned + ' of ' + scannable : '') +
       (liveCount ? ' · ' + liveCount + ' game' + (liveCount === 1 ? '' : 's') + ' live' : '');
 
@@ -648,6 +706,7 @@
     state.eventIndex = idx;
     state.summary = null;
     state.activeTab = tab || 'plays';
+    state.lastGameContentRenderAt = 0;
     state.boothFilter = 'all';
     state.seenBoothIds = {};
     state.boothPrimed = false;
@@ -656,37 +715,26 @@
     renderGameHeader();
     $('game-content').innerHTML = '<div class="loading">Loading game data…</div>';
 
-    fetch(SUMMARY_URL + '?event=' + encodeURIComponent(id))
-      .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      })
+    const requestedFinal = state.events[idx].status && state.events[idx].status.state === 'post';
+    const request = fetchSummaryQuiet(id, requestedFinal);
+    request.promise
       .then(function (json) {
-        if (current() && current().id !== id) return; // stale response
+        const open = current();
+        if (!open || open.id !== id) return; // stale response
+        cacheDaySummary(id, json, request.final);
         state.summary = json;
         renderGameHeader();
         renderTabContent();
+        state.lastGameContentRenderAt = Date.now();
+        renderScoreboard();
+        renderDayBooth();
       })
       .catch(function (err) {
-        if (current() && current().id !== id) return;
+        const open = current();
+        if (!open || open.id !== id) return;
         $('game-content').innerHTML =
           '<div class="error">Could not load game data: ' + esc(err && err.message || err) + '</div>';
       });
-  }
-
-  function refreshSummary(id) {
-    fetch(SUMMARY_URL + '?event=' + encodeURIComponent(id))
-      .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      })
-      .then(function (json) {
-        if (current() && current().id !== id) return;
-        state.summary = json;
-        renderGameHeader();
-        renderTabContent();
-      })
-      .catch(function () { /* keep last good data */ });
   }
 
   function stepGame(dir) {
@@ -755,11 +803,7 @@
   }
 
   function liveSituation() {
-    let sit = null;
-    if (state.summary && state.summary.header &&
-        state.summary.header.competitions && state.summary.header.competitions[0]) {
-      sit = state.summary.header.competitions[0].situation;
-    }
+    let sit = summarySituation(state.summary);
     if (!sit && current()) sit = current().situation;
     if (!sit) return '';
     const parts = [];
@@ -788,11 +832,7 @@
   }
 
   function liveLastPlay() {
-    let sit = null;
-    if (state.summary && state.summary.header &&
-        state.summary.header.competitions && state.summary.header.competitions[0]) {
-      sit = state.summary.header.competitions[0].situation;
-    }
+    let sit = summarySituation(state.summary);
     if ((!sit || !sit.lastPlay) && current()) sit = current().situation;
     return (sit && sit.lastPlay) ? sit.lastPlay : null;
   }
@@ -883,7 +923,7 @@
 
     const live = current() && current().status && current().status.state === 'in';
     const foot = live
-      ? 'Live booth log · pulled from ESPN play-by-play · refreshes every 15s'
+      ? 'Live booth log · pulled from ESPN play-by-play · ' + LIVE_REVIEW_SECONDS + 's polling schedule'
       : 'Booth log · pulled from ESPN play-by-play';
 
     return '<div class="booth">' +
@@ -1105,12 +1145,13 @@
     state.events = [];
     state.eventIndex = -1;
     state.summary = null;
+    state.lastGameContentRenderAt = 0;
     state.boothFilter = 'all';
     state.seenBoothIds = {};
     state.boothPrimed = false;
     state.daySummaries = {};
-    state.dayBoothFetching = {};
-    state.dayFeed = { items: [], seen: {}, primed: false };
+    state.summaryRequests = {};
+    state.dayFeed = { items: [], primed: false };
     state.dayBoothFilter = 'all';
     $('day-booth').classList.add('hidden');
     $('date-label').textContent = fmtDateLabel(d);
@@ -1121,14 +1162,12 @@
   /* -------------------------------- polling ------------------------------ */
 
   function startPolling() {
-    if (state.pollTimer) clearInterval(state.pollTimer);
-    state.pollTimer = setInterval(function () {
-      refreshScoreboard();
-      const ev = current();
-      if (ev && ev.status.state === 'in') {
-        refreshSummary(ev.id);
-      }
-    }, 15000);
+    if (state.polling) state.polling.stop();
+    state.polling = NFLRefresh.start({
+      refreshScoreboard: refreshScoreboard,
+      refreshReviews: refreshDayBooth,
+      isVisible: function () { return document.visibilityState !== 'hidden'; }
+    });
   }
 
   /* --------------------------------- init -------------------------------- */
@@ -1184,12 +1223,21 @@
       const tabs = document.querySelectorAll('#tabs .tab');
       tabs.forEach(function (t) { t.classList.toggle('active', t === btn); });
       renderTabContent();
+      state.lastGameContentRenderAt = Date.now();
     });
 
     // Escape returns from the game view to the scoreboard.
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && !$('game-view').classList.contains('hidden')) {
         showScoreboardView();
+      }
+    });
+
+    // Browsers throttle timers in background tabs. Refresh immediately when
+    // the page becomes visible instead of waiting for the next timer tick.
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState !== 'hidden' && state.polling) {
+        state.polling.refreshNow();
       }
     });
 
