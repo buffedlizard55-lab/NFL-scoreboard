@@ -5,9 +5,10 @@
  *
  * Run with:  node test/mapping.test.js   (or `npm test`)
  *
- * The fixtures mirror the exact shapes returned by the ESPN public API for
- * event 401873286 (Las Vegas Raiders @ Houston Texans, 2026 preseason W2),
- * so these assertions validate the mapping logic against real data shapes.
+ * The fixture's scoreboard, box-score, and drive records mirror ESPN response
+ * shapes for event 401873286 (Las Vegas Raiders @ Houston Texans, 2026
+ * preseason W2). It also contains focused flag/review examples used to verify
+ * classification and update behavior without a network request.
  */
 
 const assert = require('assert');
@@ -211,6 +212,19 @@ ok('boothEvents: only flagged plays, chronological, lastPlay de-duped', function
   const withLive = NFLMap.boothEvents(sample.summary.drives, last);
   assert.strictEqual(withLive.length, 5);
 
+  const resolvedLast = {
+    id: '4018732869005',
+    sequenceNumber: '8400',
+    text: 'The replay official reviewed the ruling, and the play was REVERSED.',
+    type: { text: 'Replay Review' },
+    isPenalty: false
+  };
+  const withResolution = NFLMap.boothEvents(sample.summary.drives, resolvedLast);
+  assert.strictEqual(withResolution.length, 5);
+  assert.strictEqual(withResolution[4].kind, 'replay');
+  assert.strictEqual(withResolution[4].result, 'overturned');
+  assert.strictEqual(withResolution[4].text, resolvedLast.text);
+
   const other = {
     id: 'live-1',
     text: 'Play under review.',
@@ -299,6 +313,31 @@ ok('dayBoothFeed: null-safety and missing play ids', function () {
     { id: 'g1', shortName: 'A @ B', events: [{ id: null, seq: '2', kind: 'penalty', text: 'PENALTY on A' }] }
   ]);
   assert.strictEqual(feed.length, 1); // no-id plays dedupe on their fallback key
+});
+
+ok('reconcileDayBoothFeed: updates a review result in place and appends new plays', function () {
+  const existing = [
+    { key: 'g1:p1', result: 'pending', text: 'Play under review.' },
+    { key: 'g1:p2', result: 'declined', text: 'Penalty declined.' }
+  ];
+  const fresh = [
+    { key: 'g1:p1', result: 'overturned', text: 'The ruling was reversed.' },
+    { key: 'g1:p3', result: 'confirmed', text: 'The ruling was confirmed.' }
+  ];
+  const merged = NFLMap.reconcileDayBoothFeed(existing, fresh);
+
+  assert.deepStrictEqual(merged.map(function (e) { return e.key; }),
+    ['g1:p1', 'g1:p2', 'g1:p3']);
+  assert.strictEqual(merged[0].result, 'overturned');
+  assert.strictEqual(merged[0].text, 'The ruling was reversed.');
+  assert.strictEqual(merged[1].result, 'declined');
+  assert.strictEqual(existing[0].result, 'pending'); // input array/items were not changed
+});
+
+ok('reconcileDayBoothFeed: null-safety', function () {
+  assert.deepStrictEqual(NFLMap.reconcileDayBoothFeed(null, null), []);
+  assert.deepStrictEqual(NFLMap.reconcileDayBoothFeed([], [{ key: 'g1:p1' }]),
+    [{ key: 'g1:p1' }]);
 });
 
 console.log('\nAll ' + pass + ' mapping tests passed ✓');
