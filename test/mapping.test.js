@@ -586,8 +586,12 @@ ok('boothPointsAtRisk: the ensuing kickoff settles the score', function () {
 });
 
 ok('boothPointsAtRisk: only the first entries after a score are at risk', function () {
-  // Exactly BOOTH_AT_RISK_LOOKBACK (3) entries after the score: still at
+  // Exactly BOOTH_AT_RISK_LOOKBACK (now 6) entries after the score: still at
   // risk (e.g. the verdict entry of a review); one entry further: not.
+  // The window was expanded from 3 to 6 to catch delayed booth reviews that
+  // happen after the PAT, after a timeout, or after a couple of procedural
+  // plays but still before the kickoff. The kickoff-settles rule prevents
+  // false positives once the ball is kicked.
   const make = function (fillers) {
     const plays = [
       { id: 'b1', sequenceNumber: '100', type: { text: 'Rush' },
@@ -609,11 +613,12 @@ ok('boothPointsAtRisk: only the first entries after a score are at risk', functi
     });
     return plays;
   };
+  const lb = NFLMap.BOOTH_AT_RISK_LOOKBACK;
   const inWindow = NFLMap.boothEventContext(
-    NFLMap.boothEvent(make(2)[3]), make(2), 3); // score -> play -> play -> flag
+    NFLMap.boothEvent(make(lb - 1)[lb]), make(lb - 1), lb); // score + (lb-1) fillers + flag = lb steps
   assert.strictEqual(inWindow.atRisk, true);
   const outOfWindow = NFLMap.boothEventContext(
-    NFLMap.boothEvent(make(3)[4]), make(3), 4); // one filler too far
+    NFLMap.boothEvent(make(lb)[lb + 1]), make(lb), lb + 1); // one filler too far
   assert.strictEqual(outOfWindow.atRisk, false);
 });
 
@@ -640,7 +645,7 @@ ok('boothPointsAtRisk: points already taken off by an earlier event are not at r
 });
 
 ok('boothPointsAtRisk: null-safety and exported window constant', function () {
-  assert.strictEqual(NFLMap.BOOTH_AT_RISK_LOOKBACK, 3);
+  assert.strictEqual(NFLMap.BOOTH_AT_RISK_LOOKBACK, 6);
   assert.deepStrictEqual(NFLMap.boothPointsAtRisk(null, null, 0, null), {
     atRisk: false, points: 0, team: '', scoringPlay: null
   });
@@ -857,5 +862,95 @@ ok('reconcileDayBoothFeed: null-safety', function () {
   assert.deepStrictEqual(NFLMap.reconcileDayBoothFeed([], [{ key: 'g1:p1' }]),
     [{ key: 'g1:p1' }]);
 });
+
+
+ok('isScoringPlay: extra point good is scoring, no good is not', function () {
+  const good = { text: 'K.Matsuzawa extra point is GOOD.', type: { text: 'Extra Point' }, scoringPlay: false, isPenalty: false };
+  const noGood = { text: 'K.Matsuzawa extra point is NO GOOD.', type: { text: 'Extra Point' }, scoringPlay: false, isPenalty: false };
+  const blocked = { text: 'K.Matsuzawa extra point is BLOCKED.', type: { text: 'Extra Point' }, scoringPlay: false, isPenalty: false };
+  // scoringPlay true is authoritative even for PAT
+  const flaggedGood = { text: 'K.Matsuzawa extra point is GOOD.', type: { text: 'Extra Point' }, scoringPlay: true, isPenalty: false };
+  assert.strictEqual(NFLMap.boothEvents({ previous: [{ id: 'd', team: { abbreviation: 'LV' }, plays: [good] }] }).length, 0, 'PAT good is not a booth event');
+  // Direct isScoringPlay check via boothPointsAtRisk path: a PAT good followed by a flag should be at risk (1pt)
+  // Need TD before PAT so points calculation is 1, not 7.
+  const plays = [
+    { id: 'td1', sequenceNumber: '50', type: { text: 'Rush' }, text: 'K.Cole 4 yard TD run.', awayScore: 6, homeScore: 0, scoringPlay: true, isPenalty: false },
+    { id: 'pat1', sequenceNumber: '100', type: { text: 'Extra Point' }, text: 'K.Matsuzawa extra point is GOOD.', awayScore: 7, homeScore: 0, scoringPlay: true, isPenalty: false },
+    { id: 'flag1', sequenceNumber: '200', type: { text: 'Penalty' }, text: 'PENALTY on LV-X, Holding, 10 yards.', awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: true, penalty: { yards: 10, type: { text: 'Holding' } } }
+  ];
+  const ev = NFLMap.boothEventContext(NFLMap.boothEvent(plays[2]), plays, 2);
+  assert.strictEqual(ev.atRisk, true);
+  assert.strictEqual(ev.pointsAtRisk, 1);
+});
+
+ok('isScoringPlay: field goal no good / blocked is NOT scoring', function () {
+  const good = { id: 'fg1', sequenceNumber: '100', type: { text: 'Field Goal' }, text: 'K.Matsuzawa 43 yard field goal is GOOD.', awayScore: 3, homeScore: 0, scoringPlay: true, isPenalty: false };
+  const noGood = { id: 'fg2', sequenceNumber: '200', type: { text: 'Field Goal' }, text: 'K.Matsuzawa 43 yard field goal is NO GOOD.', awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false };
+  const blocked = { id: 'fg3', sequenceNumber: '300', type: { text: 'Field Goal' }, text: 'K.Matsuzawa 43 yard field goal is BLOCKED.', awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false };
+  // Good FG should be found as scoring play for a subsequent flag
+  const playsGood = [
+    good,
+    { id: 'flag', sequenceNumber: '200', type: { text: 'Penalty' }, text: 'PENALTY on LV-X, Holding, 10 yards.', awayScore: 3, homeScore: 0, scoringPlay: false, isPenalty: true, penalty: { yards: 10, type: { text: 'Holding' } } }
+  ];
+  const evGood = NFLMap.boothEventContext(NFLMap.boothEvent(playsGood[1]), playsGood, 1);
+  assert.strictEqual(evGood.atRisk, true);
+  assert.strictEqual(evGood.pointsAtRisk, 3);
+
+  // No good FG should NOT be considered scoring, so a flag after it is not at risk
+  const playsBad = [
+    noGood,
+    { id: 'flag2', sequenceNumber: '400', type: { text: 'Penalty' }, text: 'PENALTY on LV-X, Holding, 10 yards.', awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: true, penalty: { yards: 10, type: { text: 'Holding' } } }
+  ];
+  const evBad = NFLMap.boothEventContext(NFLMap.boothEvent(playsBad[1]), playsBad, 1);
+  assert.strictEqual(evBad.atRisk, false);
+});
+
+ok('isScoringPlay: two-point conversion good is scoring, failed is not', function () {
+  const good2pt = { id: '2pt1', sequenceNumber: '100', type: { text: 'Two-Point Conversion' }, text: 'D.Carter rush for a two-point conversion is GOOD.', awayScore: 8, homeScore: 0, scoringPlay: true, isPenalty: false };
+  const failed2pt = { id: '2pt2', sequenceNumber: '200', type: { text: 'Two-Point Conversion' }, text: 'Two-point pass incomplete.', awayScore: 6, homeScore: 0, scoringPlay: false, isPenalty: false };
+  // Need TD 6pts before 2pt so points calc is 2, not 8
+  const playsGood = [
+    { id: 'td', sequenceNumber: '50', type: { text: 'Rush' }, text: 'K.Cole 4 yard TD run.', awayScore: 6, homeScore: 0, scoringPlay: true, isPenalty: false },
+    good2pt,
+    { id: 'flag', sequenceNumber: '200', type: { text: 'Penalty' }, text: 'PENALTY on LV-X, Holding, 10 yards.', awayScore: 8, homeScore: 0, scoringPlay: false, isPenalty: true, penalty: { yards: 10, type: { text: 'Holding' } } }
+  ];
+  const evGood = NFLMap.boothEventContext(NFLMap.boothEvent(playsGood[2]), playsGood, 2);
+  assert.strictEqual(evGood.atRisk, true);
+  assert.strictEqual(evGood.pointsAtRisk, 2);
+});
+
+ok('boothPointsAtRisk: TD under review in a single entry (current play is scoring)', function () {
+  // ESPN sometimes publishes "TOUCHDOWN. Play under review." as one play.
+  // That play is both scoringPlay true and review. It should be at risk
+  // on itself.
+  const plays = [
+    { id: 'prev', sequenceNumber: '100', type: { text: 'Rush' }, text: 'W.Marks for 2 yards.', awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false },
+    { id: 'tdrev', sequenceNumber: '200', type: { text: 'Rush' }, text: 'D.Carter 3 yard run, TOUCHDOWN. Play under review.', awayScore: 7, homeScore: 0, scoringPlay: true, isPenalty: false }
+  ];
+  // The TD review entry is classified as review, but its scoringPlay flag is true,
+  // so scoringPlayFromCurrent should find it.
+  const ev = NFLMap.boothEvent(plays[1]);
+  assert.strictEqual(ev.kind, 'review');
+  const withCtx = NFLMap.boothEventContext(ev, plays, 1);
+  assert.strictEqual(withCtx.atRisk, true);
+  assert.strictEqual(withCtx.pointsAtRisk, 7);
+  assert.strictEqual(withCtx.relatedScoringPlay.id, 'tdrev');
+});
+
+ok('boothPointsAtRisk: expanded window 6 catches delayed reviews after PAT and timeout', function () {
+  // Sequence: TD, PAT good, timeout, procedural play, review – still before kickoff,
+  // distance 4 after TD (within 6 but would have been outside old 3).
+  const plays = [
+    { id: 'td', sequenceNumber: '100', type: { text: 'Rush' }, text: 'K.Cole 4 yard TD run.', awayScore: 6, homeScore: 0, scoringPlay: true, isPenalty: false },
+    { id: 'pat', sequenceNumber: '200', type: { text: 'Extra Point' }, text: 'K.Matsuzawa extra point is GOOD.', awayScore: 7, homeScore: 0, scoringPlay: true, isPenalty: false },
+    { id: 'to', sequenceNumber: '300', type: { text: 'Timeout' }, text: 'Timeout #1 by LV.', awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: false },
+    { id: 'proc', sequenceNumber: '400', type: { text: 'Rush' }, text: 'W.Marks for 0 yards.', awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: false },
+    { id: 'rev', sequenceNumber: '500', type: { text: 'Replay Review' }, text: 'Play under review.', awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: false }
+  ];
+  const ev = NFLMap.boothEventContext(NFLMap.boothEvent(plays[4]), plays, 4);
+  assert.strictEqual(ev.atRisk, true, 'delayed review 4 plays after TD should be at risk with window 6');
+  assert.strictEqual(ev.pointsAtRisk, 6, 'should still reference the original TD (6pts) not the PAT');
+});
+
 
 console.log('\nAll ' + pass + ' mapping tests passed ✓');

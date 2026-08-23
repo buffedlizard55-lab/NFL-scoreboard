@@ -186,22 +186,39 @@ main {
 .badge.result.overturned { background: #fff4d6; color: #92400e; }
 .badge.result.confirmed, .badge.result.stands { background: #e9f6ee; color: var(--win); }
 .badge.result.declined, .badge.result.offsetting { background: #eef1f5; color: var(--ink-2); }
-.badge.removed { background: #fff4d6; color: #92400e; }
+.badge.removed { background: #fff4d6; color: #92400e; border: 1px solid #fcd34d; }
 /* Points that could still come off the board (pending review, unresolved
- * challenge/flag after a fresh score): orange, pulsing, impossible to miss. */
+ * challenge/flag after a fresh score): orange, pulsing, impossible to miss.
+ * Enhanced for live manual review – larger, stronger border, and more
+ * pronounced pulse so it is obvious the moment it happens. */
 .badge.atrisk {
   background: #ffedd5;
   color: #c2410c;
-  animation: atrisk-pulse 1.6s ease-in-out infinite;
+  border: 1px solid #fb923c;
+  animation: atrisk-pulse 1.2s ease-in-out infinite;
+  font-size: 12px;
+  padding: 4px 10px;
 }
 @keyframes atrisk-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(194, 65, 12, .35); }
-  50%      { box-shadow: 0 0 0 4px rgba(194, 65, 12, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(234, 88, 12, .55), 0 0 0 1px #fb923c inset; transform: scale(1); }
+  50%      { box-shadow: 0 0 0 6px rgba(234, 88, 12, 0), 0 0 0 1px #fb923c inset; transform: scale(1.03); }
 }
 @media (prefers-reduced-motion: reduce) {
   .badge.atrisk { animation: none; }
 }
 .badge .st-sub { font-weight: 600; margin-left: 4px; }
+
+/* Game cards that have points at risk get a stronger outline so they pop
+ * in the scoreboard grid while live. */
+.game-card:has(.badge.atrisk) {
+  border-color: #fb923c;
+  box-shadow: 0 0 0 2px rgba(251, 146, 60, .25), var(--shadow);
+  animation: card-atrisk 1.6s ease-in-out infinite;
+}
+@keyframes card-atrisk {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(251, 146, 60, .25), var(--shadow); }
+  50%      { box-shadow: 0 0 0 4px rgba(251, 146, 60, .15), 0 6px 22px rgba(16, 24, 40, .12); }
+}
 
 .card-top { gap: 8px; flex-wrap: wrap; }
 
@@ -435,6 +452,25 @@ main {
 .plays tr.scoring .score { color: var(--win); }
 .plays tr.turnover .desc { color: #c2410c; }
 .plays tr.penalty .desc { color: #b45309; }
+.plays tr.atrisk {
+  background: linear-gradient(90deg, #fff7ed, #ffffff);
+  border-left: 4px solid #ea580c;
+}
+.plays tr.atrisk .desc {
+  font-weight: 800;
+  color: #c2410c;
+}
+.plays tr.pts-removed {
+  background: linear-gradient(90deg, #fffbeb, #ffffff);
+  border-left: 4px solid #b45309;
+  text-decoration: line-through;
+  text-decoration-color: #b45309;
+  text-decoration-thickness: 2px;
+}
+.plays tr.pts-removed .desc {
+  color: #92400e;
+  font-weight: 700;
+}
 .yds { color: var(--ink-2); font-size: 12px; margin-left: 6px; }
 .pen { color: #b45309; font-size: 12px; }
 
@@ -637,6 +673,24 @@ button:focus-visible {
   font-size: 13px;
   font-weight: 600;
 }
+.booth-banner.atrisk-banner {
+  background: linear-gradient(90deg, #fff7ed, #ffedd5);
+  border-color: #fb923c;
+  border-left-width: 4px;
+  color: #9a3412;
+  animation: atrisk-pulse 1.6s ease-in-out infinite;
+}
+.booth-banner.removed-banner {
+  background: linear-gradient(90deg, #fffbeb, #fef3c7);
+  border-color: #f59e0b;
+  border-left-width: 4px;
+  color: #92400e;
+}
+.booth-banner.day-atrisk-banner {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 800;
+}
 .booth-banner span:last-child { line-height: 1.4; }
 .booth-empty { border: none; box-shadow: none; margin: 0; }
 .booth-feed {
@@ -661,14 +715,28 @@ button:focus-visible {
 .booth-msg.replay { border-left-color: #7c3aed; }
 .booth-msg.review { border-left-color: var(--live); }
 /* Points in jeopardy / already taken: the whole message is tinted so the
- * situation is visible while scanning the live feed. */
+ * situation is visible while scanning the live feed. Enhanced for manual
+ * review – thicker left border, stronger background, and pulse on at-risk. */
 .booth-msg.atrisk {
   border-left-color: #ea580c;
-  background: #fffaf3;
+  border-left-width: 6px;
+  background: linear-gradient(90deg, #fff7ed, #fffaf3);
+  box-shadow: 0 2px 8px rgba(234, 88, 12, .15);
+  animation: booth-atrisk 1.8s ease-in-out infinite;
 }
 .booth-msg.pts-removed {
   border-left-color: #b45309;
-  background: #fffdf5;
+  border-left-width: 6px;
+  background: linear-gradient(90deg, #fffbeb, #fffdf5);
+  box-shadow: 0 2px 8px rgba(180, 83, 9, .12);
+}
+@keyframes booth-atrisk {
+  0%, 100% { transform: translateX(0); }
+  25%      { transform: translateX(1px); }
+  75%      { transform: translateX(-1px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .booth-msg.atrisk { animation: none; }
 }
 .booth-msg.new { animation: booth-in .35s ease; }
 @keyframes booth-in {

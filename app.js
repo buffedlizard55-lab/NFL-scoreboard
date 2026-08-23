@@ -794,9 +794,34 @@
     const foot =
       'Every flag &amp; review from all of today&rsquo;s games · pulled from ESPN play-by-play · ' +
       'tracks score before &rarr; during &rarr; after when a flag/review removes points or puts them at risk · ' +
+      'covers TD, FG, safety, PAT & 2-pt · window ' + NFLMap.BOOTH_AT_RISK_LOOKBACK + ' plays before kickoff · ' +
       LIVE_REVIEW_SECONDS + 's live polling schedule' +
       (scannable ? ' · games scanned ' + scanned + ' of ' + scannable : '') +
       (liveCount ? ' · ' + liveCount + ' game' + (liveCount === 1 ? '' : 's') + ' live' : '');
+
+    // Top banner when any game has points at risk or removed – makes the
+    // possibility obvious the moment it happens live, for manual review.
+    const atRiskAll = items.filter(function (e) { return e.atRisk && !e.removesPoints; });
+    const removedAll = items.filter(function (e) { return e.removesPoints; });
+    let topBanner = '';
+    if (atRiskAll.length) {
+      const summary = atRiskAll.slice(0, 3).map(function (e) {
+        return esc(e.shortName + ': ' + e.awayAbbr + '/' + e.homeAbbr + ' ' + e.pointsAtRisk + 'pts');
+      }).join(', ');
+      const more = atRiskAll.length > 3 ? ' +' + (atRiskAll.length - 3) + ' more' : '';
+      topBanner = '<div class="booth-banner atrisk-banner day-atrisk-banner" role="status">' +
+        '<span class="badge atrisk">' + atRiskAll.length + ' PTS AT RISK</span>' +
+        '<span>Live – scores could be removed: ' + summary + more + ' – manual review needed. Filter At risk.</span>' +
+      '</div>';
+    } else if (removedAll.length) {
+      const summary = removedAll.slice(0, 3).map(function (e) {
+        return esc(e.shortName + ' ' + e.pointsRemoved + 'pts removed');
+      }).join(', ');
+      topBanner = '<div class="booth-banner removed-banner day-removed-banner" role="status">' +
+        '<span class="badge removed">PTS REMOVED</span>' +
+        '<span>' + removedAll.length + ' scoring play(s) taken off: ' + summary + '</span>' +
+      '</div>';
+    }
 
     let body;
     if (!visible.length) {
@@ -833,6 +858,7 @@
           (soundOn ? '&#128276; Sound On' : '&#128263; Sound Off') +
         '</button>' +
       '</div>' +
+      topBanner +
       '<div class="booth-filters">' + filters + '</div>' +
       body +
     '</div>';
@@ -1080,6 +1106,21 @@
     return (sit && sit.lastPlay) ? sit.lastPlay : null;
   }
 
+  function currentBoothEvents() {
+    return NFLMap.boothEvents(
+      state.summary && state.summary.drives,
+      liveLastPlay()
+    );
+  }
+
+  function boothEventsById(events) {
+    const map = {};
+    (events || []).forEach(function (e) {
+      if (e && e.id != null) map[String(e.id)] = e;
+    });
+    return map;
+  }
+
   function renderBooth(el) {
     const events = NFLMap.boothEvents(
       state.summary && state.summary.drives,
@@ -1135,13 +1176,45 @@
     const bannerRisk = (livePending && lastEvent && lastEvent.atRisk && !lastEvent.removesPoints)
       ? '<span class="badge atrisk">' + esc(lastEvent.pointsAtRisk) + ' PTS AT RISK</span>'
       : '';
-    const banner = livePending
+
+    // New: a persistent at-risk banner whenever ANY event in the current feed
+    // is at risk or has removed points, even if the live lastPlay is not
+    // currently under review. This makes the possibility obvious for manual
+    // review without waiting for the UNDER REVIEW banner.
+    const atRiskEvents = events.filter(function (e) { return e.atRisk && !e.removesPoints; });
+    const removedEvents = events.filter(function (e) { return e.removesPoints; });
+    const atRiskBanner = (!livePending && atRiskEvents.length)
+      ? '<div class="booth-banner atrisk-banner" role="status">' +
+          '<span class="badge atrisk">' + atRiskEvents.length + ' PTS AT RISK</span>' +
+          '<span>Score could be removed – ' +
+            atRiskEvents.map(function (e) {
+              const team = e.atRiskTeam === 'away' ? (current() && current().away ? current().away.abbr : 'AWAY')
+                : (current() && current().home ? current().home.abbr : 'HOME');
+              return esc(team + ' ' + e.pointsAtRisk + 'pts');
+            }).join(', ') +
+          ' – manual review needed. Switch to At risk filter.</span>' +
+        '</div>'
+      : '';
+    const removedBanner = (!livePending && !atRiskEvents.length && removedEvents.length)
+      ? '<div class="booth-banner removed-banner" role="status">' +
+          '<span class="badge removed">PTS REMOVED</span>' +
+          '<span>' + removedEvents.length + ' scoring play(s) taken off the board – ' +
+            removedEvents.map(function (e) {
+              return esc(e.pointsRemoved + 'pts ' + (e.removedTeam || ''));
+            }).join(', ') +
+          '</span>' +
+        '</div>'
+      : '';
+
+    const underReviewBanner = livePending
       ? '<div class="booth-banner" role="status">' +
           '<span class="badge review">UNDER REVIEW</span>' +
           bannerRisk +
           '<span>' + esc(lastText) + '</span>' +
         '</div>'
       : '';
+
+    const banner = underReviewBanner + atRiskBanner + removedBanner;
 
     let body;
     if (!visible.length) {
@@ -1158,8 +1231,8 @@
     const live = current() && current().status && current().status.state === 'in';
     const foot = live
       ? 'Live booth log · pulled from ESPN play-by-play · tracks score before → during → after when points are removed or at risk · ' +
-        LIVE_REVIEW_SECONDS + 's polling schedule'
-      : 'Booth log · pulled from ESPN play-by-play · tracks score before → during → after when points are removed or at risk';
+        LIVE_REVIEW_SECONDS + 's polling schedule · window ' + NFLMap.BOOTH_AT_RISK_LOOKBACK + ' plays before kickoff'
+      : 'Booth log · pulled from ESPN play-by-play · tracks score before → during → after when points are removed or at risk · covers TD, FG, safety, PAT & 2-pt';
 
     return '<div class="booth">' +
       '<div class="booth-head">' +
@@ -1262,6 +1335,21 @@
 
     const filters = boothFiltersHTML(filter, counts, 'data-redzone-filter', '');
 
+    const atRiskEvents = events.filter(function (e) { return e.atRisk && !e.removesPoints; });
+    const removedEvents = events.filter(function (e) { return e.removesPoints; });
+    let topBanner = '';
+    if (atRiskEvents.length) {
+      topBanner = '<div class="booth-banner atrisk-banner" role="status">' +
+        '<span class="badge atrisk">' + atRiskEvents.length + ' PTS AT RISK IN RZ</span>' +
+        '<span>Red zone scores could be removed – manual review needed.</span>' +
+      '</div>';
+    } else if (removedEvents.length) {
+      topBanner = '<div class="booth-banner removed-banner" role="status">' +
+        '<span class="badge removed">PTS REMOVED IN RZ</span>' +
+        '<span>' + removedEvents.length + ' red zone scoring play(s) taken off.</span>' +
+      '</div>';
+    }
+
     let body;
     if (!visible.length) {
       body = '<div class="empty booth-empty">No flags, challenges, or replay reviews in the red zone yet.</div>';
@@ -1274,7 +1362,8 @@
     const live = current() && current().status && current().status.state === 'in';
     // Literal arrow: foot passes through esc() below.
     const foot = 'Flags, challenges & replay reviews on plays that started in the ' +
-      'opponent’s 20 or inside · tracks points removed or at risk · pulled from ESPN play-by-play' +
+      'opponent’s 20 or inside · tracks points removed or at risk · covers TD, FG, safety, PAT & 2-pt · window ' +
+      NFLMap.BOOTH_AT_RISK_LOOKBACK + ' plays before kickoff' +
       (live ? ' · updated every ' + LIVE_REVIEW_SECONDS + 's while live' : '');
 
     return '<div class="booth">' +
@@ -1282,6 +1371,7 @@
         '<div class="booth-title">Red zone flags, challenges &amp; replay reviews</div>' +
         '<div class="booth-sub">' + esc(foot) + '</div>' +
       '</div>' +
+      topBanner +
       '<div class="booth-filters">' + filters + '</div>' +
       body +
     '</div>';
@@ -1294,6 +1384,11 @@
     if (!drives.length) {
       return '<div class="empty">Play-by-play is not available for this game.</div>';
     }
+    // Build a map of playId -> booth event that is at risk or removed, so the
+    // play-by-play can highlight the exact moment a score could be wiped.
+    const boothEvents = currentBoothEvents();
+    const boothById = boothEventsById(boothEvents);
+
     let out = [];
     let lastQ = null;
     drives.forEach(function (d) {
@@ -1303,19 +1398,35 @@
         out.push('<h3 class="quarter">' + esc(ql) + '</h3>');
         lastQ = ql;
       }
-      out.push(driveSectionHTML(d));
+      out.push(driveSectionHTML(d, boothById));
     });
-    return '<div class="pbp">' + out.join('') + '</div>';
+    // If any booth event is at risk, add a top banner to the play-by-play too
+    // so the situation is obvious without switching to the Flags tab.
+    const atRiskInGame = boothEvents.filter(function (e) { return e.atRisk && !e.removesPoints; });
+    const removedInGame = boothEvents.filter(function (e) { return e.removesPoints; });
+    let topBanner = '';
+    if (atRiskInGame.length) {
+      topBanner = '<div class="booth-banner atrisk-banner" role="status">' +
+        '<span class="badge atrisk">' + atRiskInGame.length + ' PTS AT RISK</span>' +
+        '<span>Play-by-play contains flags/reviews that could remove points – see highlighted rows and check Flags & Reviews At risk filter for manual review.</span>' +
+      '</div>';
+    } else if (removedInGame.length) {
+      topBanner = '<div class="booth-banner removed-banner" role="status">' +
+        '<span class="badge removed">PTS REMOVED</span>' +
+        '<span>' + removedInGame.length + ' scoring play(s) taken off the board in this game.</span>' +
+      '</div>';
+    }
+    return '<div class="pbp">' + topBanner + out.join('') + '</div>';
   }
 
-  function driveSectionHTML(d) {
+  function driveSectionHTML(d, boothById) {
     const t = d.team || {};
     const logo = (t.logos && t.logos.length) ? t.logos[0].href : '';
     const result = d.displayResult
       ? '<span class="drive-result">' + esc(d.displayResult) + '</span>'
       : '';
     const rows = (d.plays || []).map(function (p) {
-      return playRowHTML(NFLMap.playRow(p));
+      return playRowHTML(NFLMap.playRow(p), boothById && p && p.id != null ? boothById[String(p.id)] : null);
     }).join('');
     return '' +
       '<div class="drive">' +
@@ -1329,18 +1440,30 @@
       '</div>';
   }
 
-  function playRowHTML(p) {
+  function playRowHTML(p, boothEvent) {
     const cls = [];
     if (p.scoring) cls.push('scoring');
     if (p.turnover) cls.push('turnover');
     if (p.penalty) cls.push('penalty');
+    if (boothEvent) {
+      if (boothEvent.removesPoints) cls.push('pts-removed');
+      if (boothEvent.atRisk && !boothEvent.removesPoints) cls.push('atrisk');
+    }
     const yard = p.yardage != null ? '<span class="yds">' + esc(p.yardage) + ' yds</span>' : '';
     const pen = p.penaltyText ? ' <span class="pen">(' + esc(p.penaltyText) + ')</span>' : '';
+    let riskBadge = '';
+    if (boothEvent) {
+      if (boothEvent.removesPoints) {
+        riskBadge = ' <span class="badge removed">' + esc(boothEvent.pointsRemoved) + ' PTS REMOVED</span>';
+      } else if (boothEvent.atRisk) {
+        riskBadge = ' <span class="badge atrisk">' + esc(boothEvent.pointsAtRisk) + ' PTS AT RISK</span>';
+      }
+    }
     return '' +
       '<tr class="' + cls.join(' ') + '">' +
         '<td class="dd">' + esc(p.downDistance) + '</td>' +
         '<td class="clock">' + esc(p.clock) + '</td>' +
-        '<td class="desc">' + esc(p.text) + pen + yard + '</td>' +
+        '<td class="desc">' + esc(p.text) + pen + yard + riskBadge + '</td>' +
         '<td class="score">' + esc(p.awayScore) + '–' + esc(p.homeScore) + '</td>' +
       '</tr>';
   }
