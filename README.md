@@ -44,9 +44,14 @@ the repository root — no build step:
   every game of the selected day** into one live log. Messages carry the game
   (e.g. "LV @ HOU"), a LIVE badge while that game is in progress, the flag
   type and result, quarter & clock, and the play text, and can be filtered by
-  kind (All / Flags / Challenges / Replay / Under review / **At risk**). New
+  kind (All / Flags / Challenges / Replay / Under review / **At risk** /
+  **Red zone** — the same cut as a game's Red Zone tab, applied across every
+  game of the day: only the flags, challenges, replay reviews, and
+  under-review plays on downs that **started in the opponent's 20-yard line
+  or inside**). New
   messages appear at the bottom as the feed discovers them, and clicking one
-  opens that game's own **Flags & Reviews** tab. The scoreboard also keeps a
+  opens that game's own **Flags & Reviews** tab (or its **Red Zone** tab
+  while the Red zone filter is active). The scoreboard also keeps a
   **REVIEW** badge on a game card while its last play is under review, plus a
   **PTS AT RISK** / **PTS REMOVED** badge while the game's newest booth event
   could still take points off the board (or just did). Booth events also show
@@ -89,7 +94,9 @@ the repository root — no build step:
     **started in the opponent's 20-yard line or inside**. Red-zone entries
     carry a small red **RZ** badge in the Flags & Reviews tab and in the
     all-games live booth chat, so red-zone trouble is visible without
-    switching tabs. Like the booth log, it repaints on every 1-second
+    switching tabs — and the all-games booth's filter row has a **Red zone**
+    chip that applies this same cut across every game of the day. Like the
+    booth log, it repaints on every 1-second
     response while the game is live and can be filtered by kind
     (All / Flags / Challenges / Replay / Under review / At risk), and its
     entries carry the same points-removed / points-at-risk highlights.
@@ -171,7 +178,11 @@ immediate repaint of both the booth and red zone tabs, visibility gating,
 immediate refresh, timer cleanup, browser-app wiring, request dedupe, the
 booth sound button (renders, toggles, and triggers the alert buzz), and
 rendering against an injected API-shaped payload — including opening a game
-and verifying the Red Zone tab shows only red-zone booth events, and that a
+and verifying the Red Zone tab shows only red-zone booth events, checking
+the all-games booth's Red zone filter chip (its count, that it cuts the day
+feed to red-zone flags/challenges/reviews only, that it counts and keeps
+red-zone events from **each** game of a two-game day, and that clicking a
+message while it is active opens that game's Red Zone tab), and that a
 pending review of a ruled touchdown is badged POINTS AT RISK in the feed and
 on its game card while a newly appearing at-risk penalty triggers the alert
 buzz.

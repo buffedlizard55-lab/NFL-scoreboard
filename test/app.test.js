@@ -78,6 +78,91 @@ async function run() {
     }
   };
 
+  // A second game for the multi-game-day scenario near the end of this file:
+  // another live game (cloned shape, new id/teams) whose summary carries one
+  // red-zone booth event and one from farther out, so the all-games Red zone
+  // filter can be checked across EVERY game of the day.
+  const secondEvent = JSON.parse(JSON.stringify(liveEvent));
+  secondEvent.id = '299001001';
+  secondEvent.name = 'San Francisco 49ers at Los Angeles Chargers';
+  secondEvent.shortName = 'SF @ LAC';
+  const secondKickoff = new Date(new Date(liveEvent.date).getTime() + 4 * 3600 * 1000);
+  secondEvent.date = secondKickoff.toISOString();
+  secondEvent.competitions[0].date = secondKickoff.toISOString();
+  secondEvent.competitions[0].competitors.forEach(function (c) {
+    c.records = [];
+    c.score = '0';
+    if (c.homeAway === 'away') {
+      c.team.abbreviation = 'SF';
+      c.team.displayName = 'San Francisco 49ers';
+      c.team.shortDisplayName = '49ers';
+      c.team.location = 'San Francisco';
+      c.team.name = '49ers';
+      c.team.color = 'aa0000';
+      c.team.logo = '';
+    } else {
+      c.team.abbreviation = 'LAC';
+      c.team.displayName = 'Los Angeles Chargers';
+      c.team.shortDisplayName = 'Chargers';
+      c.team.location = 'Los Angeles';
+      c.team.name = 'Chargers';
+      c.team.color = '0080c6';
+      c.team.logo = '';
+    }
+  });
+  secondEvent.competitions[0].status.type.state = 'in';
+  secondEvent.competitions[0].status.type.shortDetail = 'Q1 9:15';
+  secondEvent.competitions[0].status.displayClock = '9:15';
+  secondEvent.competitions[0].status.period = 1;
+  // Neutral non-booth last play: nothing is added to this game's booth feed.
+  secondEvent.competitions[0].situation = {
+    lastPlay: {
+      id: '2990010019001',
+      sequenceNumber: '900',
+      text: 'B.Purdy up the middle for 2 yards.',
+      type: { text: 'Rush' },
+      period: { number: 1 },
+      clock: { displayValue: '9:15' },
+      start: { yardsToEndzone: 58, downDistanceText: '2nd & 8 at LAC 42' }
+    }
+  };
+  const secondSummary = {
+    drives: {
+      previous: [{
+        id: 'g2-drive-1',
+        description: 'fixture: second game drive',
+        team: { abbreviation: 'SF', displayName: 'San Francisco 49ers', logos: [] },
+        plays: [
+          {
+            // Red zone: 12 yards to the goal line (<= NFLMap.RED_ZONE_DISTANCE).
+            id: 'g2rz1', sequenceNumber: '100', type: { text: 'Pass Reception' },
+            text: 'San Francisco challenged the catch ruling, and the play was Upheld.',
+            awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false,
+            period: { number: 1 }, clock: { displayValue: '9:15' },
+            start: { yardsToEndzone: 12, downDistanceText: '1st & 10 at LAC 12' }
+          },
+          {
+            // Midfield: outside the red zone.
+            id: 'g2p1', sequenceNumber: '110', type: { text: 'Penalty' },
+            text: 'PENALTY on SF-T.Williams, False Start, 5 yards, enforced at SF 47 - No Play.',
+            awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: true,
+            penalty: { yards: 5, type: { text: 'False Start' } },
+            period: { number: 1 }, clock: { displayValue: '9:00' },
+            start: { yardsToEndzone: 53, downDistanceText: '1st & 10 at SF 47' }
+          }
+        ]
+      }]
+    }
+  };
+  // The day after state.date is when the two-game scoreboard is served.
+  const nextDayYmd = (function () {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return '' + d.getFullYear() +
+      String(d.getMonth() + 1).padStart(2, '0') +
+      String(d.getDate()).padStart(2, '0');
+  })();
+
   const summary = JSON.parse(JSON.stringify(sample.summary));
   summary.header = { competitions: [{ situation: competition.situation }] };
   // Add an API-shaped reversed-TD sequence so the booth smoke test also
@@ -193,12 +278,18 @@ async function run() {
       fetches.push(url);
       fetchOptions.push(options);
       if (url.indexOf('/scoreboard') !== -1) {
+        // Only the next day serves the two-game scoreboard; every other day
+        // keeps the original single-game scenario above.
+        if (url.indexOf('dates=' + nextDayYmd) !== -1) {
+          return Promise.resolve(response({ events: [liveEvent, secondEvent], leagues: [] }));
+        }
         return Promise.resolve(response({ events: [liveEvent], leagues: [] }));
       }
       if (url.indexOf('/summary') !== -1) {
-        if (!holdSummaries) return Promise.resolve(response(summary));
+        const payload = url.indexOf('event=299001001') !== -1 ? secondSummary : summary;
+        if (!holdSummaries) return Promise.resolve(response(payload));
         return new Promise(function (resolve) {
-          pendingSummaries.push(function () { resolve(response(summary)); });
+          pendingSummaries.push(function () { resolve(response(payload)); });
         });
       }
       return Promise.reject(new Error('Unexpected URL: ' + url));
@@ -248,6 +339,11 @@ async function run() {
   assert.ok(elements['day-booth'].innerHTML.indexOf('LV 7 PTS AT RISK') !== -1);
   assert.ok(elements['day-booth'].innerHTML.indexOf('D.Carter 3 yard run, TOUCHDOWN.') !== -1);
   assert.ok(elements['day-booth'].innerHTML.indexOf('data-day-filter="risk"') !== -1);
+  // The all-games booth also exposes the per-game Red Zone cut as a filter
+  // chip. The feed currently holds exactly one red-zone booth event (the
+  // false start enforced at HST 19), so the chip counts it.
+  assert.ok(elements['day-booth'].innerHTML.indexOf('data-day-filter="redzone"') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('Red zone · 1') !== -1);
   assert.ok(elements['scoreboard-view'].innerHTML.indexOf('PTS AT RISK') !== -1);
   const scoreboardWritesBeforeResolution = elements['scoreboard-view'].innerHTMLWrites();
 
@@ -373,6 +469,62 @@ async function run() {
   assert.ok(audio.oscillatorCount > oscillatorsBeforeRisk,
     'an at-risk penalty plays the alert buzz');
 
+  // The all-games booth's Red zone filter: the per-game Red Zone tab cut
+  // applied across the whole day feed — only booth events whose play started
+  // in the opponent's 20 or inside remain.
+  function clickDayFilter(value) {
+    elements['day-booth'].dispatch('click', {
+      target: {
+        closest: function (selector) {
+          if (selector === '.day-sound-btn') return null;
+          if (selector === '.day-filter') {
+            return { getAttribute: function () { return value; } };
+          }
+          return null;
+        }
+      }
+    });
+  }
+  clickDayFilter('redzone');
+  const dayRz = elements['day-booth'].innerHTML;
+  assert.ok(dayRz.indexOf(
+    'class="booth-filter day-filter active" data-day-filter="redzone"') !== -1);
+  // The red-zone false start (enforced at HST 19) remains…
+  assert.ok(dayRz.indexOf('enforced at HST 19') !== -1);
+  // …while every booth event from farther out is hidden: the LV 25 false
+  // start, the HOU challenge, and the under-review entries.
+  assert.ok(dayRz.indexOf('enforced at LV 25') === -1);
+  assert.ok(dayRz.indexOf('Houston challenged') === -1);
+  assert.ok(dayRz.indexOf('Play under review') === -1);
+
+  // Clicking a message while the Red zone filter is active opens that game
+  // straight into its own Red Zone tab.
+  elements['day-booth'].dispatch('click', {
+    target: {
+      closest: function (selector) {
+        if (selector === '.day-sound-btn' || selector === '.day-filter') return null;
+        if (selector === '.day-msg') {
+          return { getAttribute: function () { return '401873286'; } };
+        }
+        return null;
+      }
+    }
+  });
+  assert.strictEqual(elements['game-view'].classList.contains('hidden'), false);
+  assert.ok(elements['tabs'].innerHTML.indexOf(
+    'class="tab active" data-tab="redzone"') !== -1);
+  assert.strictEqual(pendingSummaries.length, 1,
+    'opening the game from a day-booth message requests its detail');
+  pendingSummaries.shift()();
+  await flush();
+  await flush();
+  elements['back-btn'].dispatch('click', {});
+  assert.strictEqual(elements['game-view'].classList.contains('hidden'), true);
+
+  // Switching back to All restores the full day feed.
+  clickDayFilter('all');
+  assert.ok(elements['day-booth'].innerHTML.indexOf('enforced at LV 25') !== -1);
+
   // Open the game from the scoreboard card and switch to the Red Zone tab.
   // holdSummaries is still on, so the detail request parks in pendingSummaries.
   elements['scoreboard-view'].dispatch('click', {
@@ -429,6 +581,70 @@ async function run() {
   assert.ok(elements['game-content'].innerHTML.indexOf(
     'class="booth-filter active" data-redzone-filter="penalty"') !== -1);
 
+  // --- Multi-game day: the Red zone filter cuts EVERY game of the day -----
+  // The next day serves two live games: LV @ HOU (one red-zone booth event,
+  // the false start enforced at HST 19) and SF @ LAC (one red-zone challenge
+  // at the LAC 12, plus one midfield flag). holdSummaries is off again, so
+  // every request resolves on its own.
+  holdSummaries = false;
+  elements['next-day'].dispatch('click', {});
+  await flush();
+  await flush();
+  await flush();
+
+  // Both games rendered, and the day feed merged both games' booth events.
+  const twoGameDay = elements['day-booth'].innerHTML;
+  assert.ok(elements['scoreboard-view'].innerHTML.indexOf('data-id="299001001"') !== -1);
+  assert.ok(twoGameDay.indexOf('enforced at HST 19') !== -1);   // game A, red zone
+  assert.ok(twoGameDay.indexOf('catch ruling') !== -1);         // game B, red zone
+  assert.ok(twoGameDay.indexOf('enforced at SF 47') !== -1);    // game B, midfield
+  // The Red zone chip counts red-zone events from EACH game: 1 + 1.
+  assert.ok(twoGameDay.indexOf('Red zone · 2') !== -1);
+
+  clickDayFilter('redzone');
+  const twoGameRz = elements['day-booth'].innerHTML;
+  assert.ok(twoGameRz.indexOf(
+    'class="booth-filter day-filter active" data-day-filter="redzone"') !== -1);
+  // The red zone events of BOTH games are kept…
+  assert.ok(twoGameRz.indexOf('enforced at HST 19') !== -1);
+  assert.ok(twoGameRz.indexOf('catch ruling') !== -1);
+  assert.ok(twoGameRz.indexOf('SF @ LAC') !== -1);
+  // …and everything farther out is hidden, whichever game it came from.
+  assert.ok(twoGameRz.indexOf('enforced at SF 47') === -1);
+  assert.ok(twoGameRz.indexOf('enforced at LV 25') === -1);
+  assert.ok(twoGameRz.indexOf('Play under review') === -1);
+
+  // Clicking the second game's filtered message opens that game's own
+  // Red Zone tab, which shows the same cut for its game.
+  elements['day-booth'].dispatch('click', {
+    target: {
+      closest: function (selector) {
+        if (selector === '.day-sound-btn' || selector === '.day-filter') return null;
+        if (selector === '.day-msg') {
+          return { getAttribute: function () { return '299001001'; } };
+        }
+        return null;
+      }
+    }
+  });
+  await flush();
+  await flush();
+  await flush();
+  assert.strictEqual(elements['game-view'].classList.contains('hidden'), false);
+  assert.strictEqual(elements['game-pos'].textContent, '2 of 2');
+  assert.ok(elements['tabs'].innerHTML.indexOf(
+    'class="tab active" data-tab="redzone"') !== -1);
+  const secondGameRz = elements['game-content'].innerHTML;
+  assert.ok(secondGameRz.indexOf('Red zone flags, challenges &amp; replay reviews') !== -1);
+  assert.ok(secondGameRz.indexOf('catch ruling') !== -1);
+  assert.ok(secondGameRz.indexOf('badge rz') !== -1);
+  assert.ok(secondGameRz.indexOf('enforced at SF 47') === -1);
+
+  // Leave the day booth in its default state for tidiness.
+  elements['back-btn'].dispatch('click', {});
+  clickDayFilter('all');
+  assert.ok(elements['day-booth'].innerHTML.indexOf('enforced at SF 47') !== -1);
+
   console.log('NFL scoreboard app smoke test');
   console.log('  ✓ live details use the 1-second timer');
   console.log('  ✓ overlapping detail requests are deduplicated');
@@ -443,7 +659,9 @@ async function run() {
   console.log('  ✓ a pending review of a touchdown is badged POINTS AT RISK in feed and card');
   console.log('  ✓ a newly appearing at-risk penalty triggers the alert buzz');
   console.log('  ✓ red-zone booth events carry the RZ badge in the all-games feed');
+  console.log('  ✓ the all-games booth has the Red zone filter (chip, count, cut, click-through)');
   console.log('  ✓ the Red Zone tab shows only red-zone flags/reviews, with working filters');
+  console.log('  ✓ a two-game day counts and filters red-zone events from EACH game');
 }
 
 run().catch(function (err) {

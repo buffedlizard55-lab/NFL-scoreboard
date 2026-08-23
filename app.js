@@ -50,15 +50,23 @@
     ['risk', 'At risk']
   ];
 
+  /* The all-games live booth gets one extra chip: the per-game Red Zone cut
+   * (same as a game's Red Zone tab — see NFLMap.isRedZonePlay) applied
+   * across every game of the day. The single-game feeds don't need the chip:
+   * Flags & Reviews badges red-zone plays with RZ instead, and the Red Zone
+   * tab already IS this cut for one game. */
+  const DAY_BOOTH_FILTERS = BOOTH_FILTERS.concat([['redzone', 'Red zone']]);
+
   function boothEventAtRisk(e) {
     return !!(e && (e.atRisk || e.removesPoints));
   }
 
   function boothKindCounts(events) {
-    const counts = { all: events.length, penalty: 0, challenge: 0, replay: 0, review: 0, risk: 0 };
+    const counts = { all: events.length, penalty: 0, challenge: 0, replay: 0, review: 0, risk: 0, redzone: 0 };
     events.forEach(function (e) {
       if (e && e.kind != null && counts[e.kind] != null) counts[e.kind] += 1;
       if (boothEventAtRisk(e)) counts.risk += 1;
+      if (e && e.redZone) counts.redzone += 1;
     });
     return counts;
   }
@@ -66,11 +74,12 @@
   function boothEventShown(e, filter) {
     if (!filter || filter === 'all') return true;
     if (filter === 'risk') return boothEventAtRisk(e);
+    if (filter === 'redzone') return !!e.redZone;
     return e.kind === filter;
   }
 
-  function boothFiltersHTML(filter, counts, attr, extraClass) {
-    return BOOTH_FILTERS.map(function (pair) {
+  function boothFiltersHTML(filter, counts, attr, extraClass, filters) {
+    return (filters || BOOTH_FILTERS).map(function (pair) {
       const id = pair[0], label = pair[1];
       const n = counts[id];
       const extra = id === 'all' ? '' : ' · ' + n;
@@ -137,7 +146,7 @@
     summaryRequests: {},   // eventId -> { promise, final } for an in-flight fetch
     dayFeed: { items: [], primed: false }, // day-wide booth chat feed
     dayBoothRisk: {},      // eventId -> newest booth event's points state, for card badges
-    dayBoothFilter: 'all', // filter for the day-wide booth chat
+    dayBoothFilter: 'all', // day-wide booth filter, incl. the 'redzone' cut
     alertedBoothKeys: {},   // non-penalty booth events already announced
     audioContext: null,     // created only after a user gesture (autoplay policy)
     soundEnabled: true,     // booth alert sound; ON by default so existing alerts still play
@@ -775,7 +784,7 @@
       return boothEventShown(e, filter);
     });
 
-    const filters = boothFiltersHTML(filter, counts, 'data-day-filter', ' day-filter');
+    const filters = boothFiltersHTML(filter, counts, 'data-day-filter', ' day-filter', DAY_BOOTH_FILTERS);
 
     const scannable = state.events.filter(dayBoothScannable).length;
     const scanned = Object.keys(state.daySummaries).length;
@@ -794,7 +803,11 @@
       body = '<div class="empty booth-empty">' +
         (scanned < scannable
           ? 'Scanning today&rsquo;s games for flags and reviews&hellip;'
-          : 'No flags or reviews on this day yet &mdash; kickoff hasn&rsquo;t happened, or the games were clean.') +
+          : (filter === 'redzone' && counts.all
+            ? 'No flags, challenges, or replay reviews started in the red zone ' +
+              '(the opponent&rsquo;s 20 or inside) &mdash; this day&rsquo;s booth events ' +
+              'all came from farther out.'
+            : 'No flags or reviews on this day yet &mdash; kickoff hasn&rsquo;t happened, or the games were clean.')) +
         '</div>';
     } else {
       body = '<div class="day-feed" role="log" aria-live="polite" aria-relevant="additions">' +
@@ -1503,7 +1516,8 @@
     });
 
     // The day-wide booth chat: sound toggle + filter buttons + click a message
-    // to open that game's own Flags & Reviews tab.
+    // to open that game's own Flags & Reviews tab (or its Red Zone tab while the
+    // Red zone filter is active — the same cut the user was just browsing).
     $('day-booth').addEventListener('click', function (e) {
       if (e.target.closest('.day-sound-btn')) {
         toggleBoothSound();
@@ -1517,7 +1531,8 @@
       }
       const msg = e.target.closest('.day-msg');
       if (msg) {
-        openGame(msg.getAttribute('data-id'), 'booth');
+        openGame(msg.getAttribute('data-id'),
+          state.dayBoothFilter === 'redzone' ? 'redzone' : 'booth');
         return;
       }
     });
