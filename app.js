@@ -38,6 +38,50 @@
     offsetting: 'Offsetting'
   };
 
+  /* One shared filter row for all three booth feeds (day chat, Flags &
+   * Reviews, Red Zone). "At risk" selects the events that removed points or
+   * still could — the ones worth manual review. */
+  const BOOTH_FILTERS = [
+    ['all', 'All'],
+    ['penalty', 'Flags'],
+    ['challenge', 'Challenges'],
+    ['replay', 'Replay'],
+    ['review', 'Under review'],
+    ['risk', 'At risk']
+  ];
+
+  function boothEventAtRisk(e) {
+    return !!(e && (e.atRisk || e.removesPoints));
+  }
+
+  function boothKindCounts(events) {
+    const counts = { all: events.length, penalty: 0, challenge: 0, replay: 0, review: 0, risk: 0 };
+    events.forEach(function (e) {
+      if (e && e.kind != null && counts[e.kind] != null) counts[e.kind] += 1;
+      if (boothEventAtRisk(e)) counts.risk += 1;
+    });
+    return counts;
+  }
+
+  function boothEventShown(e, filter) {
+    if (!filter || filter === 'all') return true;
+    if (filter === 'risk') return boothEventAtRisk(e);
+    return e.kind === filter;
+  }
+
+  function boothFiltersHTML(filter, counts, attr, extraClass) {
+    return BOOTH_FILTERS.map(function (pair) {
+      const id = pair[0], label = pair[1];
+      const n = counts[id];
+      const extra = id === 'all' ? '' : ' · ' + n;
+      return '<button type="button" class="booth-filter' + (extraClass || '') +
+        (filter === id ? ' active' : '') +
+        '" ' + attr + '="' + id + '"' +
+        (n === 0 && id !== 'all' ? ' disabled' : '') + '>' +
+        esc(label) + extra + '</button>';
+    }).join('');
+  }
+
   const TEAM_STAT_ORDER = [
     ['firstDowns', 'First Downs'],
     ['thirdDownEff', '3rd Down Efficiency'],
@@ -92,6 +136,7 @@
     daySummaries: {},      // eventId -> { drives, situation, final }
     summaryRequests: {},   // eventId -> { promise, final } for an in-flight fetch
     dayFeed: { items: [], primed: false }, // day-wide booth chat feed
+    dayBoothRisk: {},      // eventId -> newest booth event's points state, for card badges
     dayBoothFilter: 'all', // filter for the day-wide booth chat
     alertedBoothKeys: {},   // non-penalty booth events already announced
     audioContext: null,     // created only after a user gesture (autoplay policy)
@@ -328,6 +373,15 @@
     const reviewBadge = (liveBooth && liveBooth.kind === 'review')
       ? '<span class="badge review">REVIEW</span>'
       : '';
+    // Points state of this game's newest booth event, recomputed on every
+    // one-second booth pass (see renderDayBooth): still on the board but
+    // could come off, or already taken off.
+    const risk = state.dayBoothRisk[ev.id];
+    const riskBadge = risk
+      ? (risk.removesPoints
+        ? '<span class="badge removed">PTS REMOVED</span>'
+        : (risk.atRisk ? '<span class="badge atrisk">PTS AT RISK</span>' : ''))
+      : '';
     const aria = esc(away.abbr) + ' at ' + esc(home.abbr) + ', ' + esc(st.text) +
       (away.score !== '' && home.score !== '' ? ', ' + esc(away.score) + ' to ' + esc(home.score) : '') +
       '. Open game details.';
@@ -335,7 +389,7 @@
       '<article class="game-card" data-id="' + esc(ev.id) + '" tabindex="0" role="button" aria-label="' + aria + '">' +
         '<div class="card-top">' +
           '<span class="badge ' + st.cls + '">' + esc(st.text) + sub + '</span>' +
-          reviewBadge + bcast +
+          reviewBadge + riskBadge + bcast +
         '</div>' +
         teamRowHTML(away) +
         teamRowHTML(home) +
@@ -412,6 +466,17 @@
     const kind = NFLMap.classifyBooth(lp);
     if (!kind) return null;
     return { kind: kind, play: lp, text: lp.text || lp.shortText || '' };
+  }
+
+  /* Everything a game card can show about the booth right now, folded into
+   * one comparable string so a one-second tick only repaints the scoreboard
+   * when a badge actually appears, changes, or disappears. */
+  function boothCardSignature(ev) {
+    if (!ev) return '';
+    const liveBooth = lastPlayBooth(ev);
+    const risk = state.dayBoothRisk[ev.id];
+    return (liveBooth && liveBooth.kind === 'review' ? 'review' : '') + ':' +
+      (risk ? (risk.removesPoints ? 'removed' : (risk.atRisk ? 'risk' : '')) : '');
   }
 
   /* ----------------------- day-wide live booth chat ---------------------- */
@@ -505,11 +570,8 @@
         request.promise
           .then(function (json) {
             if (toYMD(state.date) !== stamp) return; // the user moved on
-            const priorBooth = lastPlayBooth(ev);
-            const hadReviewBadge = !!(priorBooth && priorBooth.kind === 'review');
+            const cardSigBefore = boothCardSignature(ev);
             cacheDaySummary(ev.id, json, request.final);
-            const nextBooth = lastPlayBooth(ev);
-            const hasReviewBadge = !!(nextBooth && nextBooth.kind === 'review');
 
             const open = current();
             if (open && open.id === ev.id) {
@@ -525,13 +587,14 @@
                 state.lastGameContentRenderAt = now;
               }
             }
-            // Summary data only affects the card's REVIEW badge; avoid rebuilding
-            // every card on each one-second tick when that badge did not change.
-            if (hadReviewBadge !== hasReviewBadge &&
+            // renderDayBooth refreshes the day feed and this game's card-badge
+            // state; then repaint the cards only when a badge (review /
+            // points at risk / points removed) actually changed.
+            renderDayBooth();
+            if (boothCardSignature(ev) !== cardSigBefore &&
                 !$('scoreboard-view').classList.contains('hidden')) {
               renderScoreboard();
             }
-            renderDayBooth();
           })
           .catch(function () { /* keep last good data on transient failure */ })
       );
@@ -617,7 +680,10 @@
       const key = event && event.key != null ? String(event.key) : '';
       if (!key || state.alertedBoothKeys[key]) return;
       state.alertedBoothKeys[key] = true;
-      if (event.kind !== 'penalty') shouldBuzz = true;
+      // Challenges, replay reviews and under-review plays always announce.
+      // Ordinary penalties stay silent, except when the flag removes points
+      // or puts them at risk — that is exactly the moment to look up.
+      if (event.kind !== 'penalty' || boothEventAtRisk(event)) shouldBuzz = true;
     });
     if (shouldBuzz && state.soundEnabled) buzzBoothAlert();
   }
@@ -641,6 +707,17 @@
       const cached = state.daySummaries[ev.id] || null;
       const cachedPlay = cached && cached.situation && cached.situation.lastPlay;
       const lastPlay = cachedPlay || (ev.situation && ev.situation.lastPlay) || null;
+      const events = NFLMap.boothEvents(cached && cached.drives, lastPlay);
+      // The newest booth event's points state drives the game card's
+      // PTS AT RISK / PTS REMOVED badge (events are sorted by sequence).
+      const lastEvent = events.length ? events[events.length - 1] : null;
+      state.dayBoothRisk[ev.id] = lastEvent
+        ? {
+          atRisk: !!lastEvent.atRisk,
+          removesPoints: !!lastEvent.removesPoints,
+          points: lastEvent.pointsAtRisk || lastEvent.pointsRemoved || 0
+        }
+        : null;
       return {
         id: ev.id,
         shortName: ev.shortName ||
@@ -649,7 +726,7 @@
         homeAbbr: (ev.home && ev.home.abbr) || '',
         date: ev.date || null,
         live: !!(ev.status && ev.status.state === 'in'),
-        events: NFLMap.boothEvents(cached && cached.drives, lastPlay)
+        events: events
       };
     }));
 
@@ -693,30 +770,12 @@
     const filter = state.dayBoothFilter || 'all';
     const items = state.dayFeed.items || [];
     const liveNow = liveGamesNow();
-    const counts = { all: items.length, penalty: 0, challenge: 0, replay: 0, review: 0 };
-    items.forEach(function (e) {
-      if (counts[e.kind] != null) counts[e.kind] += 1;
-    });
+    const counts = boothKindCounts(items);
     const visible = items.filter(function (e) {
-      return filter === 'all' || e.kind === filter;
+      return boothEventShown(e, filter);
     });
 
-    const filters = [
-      ['all', 'All'],
-      ['penalty', 'Flags'],
-      ['challenge', 'Challenges'],
-      ['replay', 'Replay'],
-      ['review', 'Under review']
-    ].map(function (pair) {
-      const id = pair[0], label = pair[1];
-      const n = counts[id];
-      const extra = id === 'all' ? '' : ' · ' + n;
-      return '<button type="button" class="booth-filter day-filter' +
-        (filter === id ? ' active' : '') +
-        '" data-day-filter="' + id + '"' +
-        (n === 0 && id !== 'all' ? ' disabled' : '') + '>' +
-        esc(label) + extra + '</button>';
-    }).join('');
+    const filters = boothFiltersHTML(filter, counts, 'data-day-filter', ' day-filter');
 
     const scannable = state.events.filter(dayBoothScannable).length;
     const scanned = Object.keys(state.daySummaries).length;
@@ -725,7 +784,7 @@
     }).length;
     const foot =
       'Every flag &amp; review from all of today&rsquo;s games · pulled from ESPN play-by-play · ' +
-      'tracks score before &rarr; during &rarr; after when a flag/review removes points · ' +
+      'tracks score before &rarr; during &rarr; after when a flag/review removes points or puts them at risk · ' +
       LIVE_REVIEW_SECONDS + 's live polling schedule' +
       (scannable ? ' · games scanned ' + scanned + ' of ' + scannable : '') +
       (liveCount ? ' · ' + liveCount + ' game' + (liveCount === 1 ? '' : 's') + ' live' : '');
@@ -782,17 +841,29 @@
           (removedAbbr ? esc(removedAbbr) + ' ' : '') +
           '&minus;' + esc(e.pointsRemoved) + ' PTS</span>'
       : '';
-    const related = e.removesPoints && e.relatedScoringPlay && e.relatedScoringPlay.text
+    // Points that could still come off (pending review, unresolved
+    // challenge/flag after a fresh score): highlighted so the moment is
+    // obvious while it is still live, not only after the score drops.
+    const riskAbbr = e.atRiskTeam === 'away' ? awayAbbr
+      : (e.atRiskTeam === 'home' ? homeAbbr : '');
+    const riskBadge = (e.atRisk && !e.removesPoints)
+      ? '<span class="badge atrisk">' +
+          (riskAbbr ? esc(riskAbbr) + ' ' : '') +
+          esc(e.pointsAtRisk) + ' PTS AT RISK</span>'
+      : '';
+    const related = (e.removesPoints || e.atRisk) && e.relatedScoringPlay && e.relatedScoringPlay.text
       ? '<span class="booth-note">' + esc(e.relatedScoringPlay.text) + '</span>'
       : '';
-    return '<span class="booth-state' + (e.removesPoints ? ' removed' : '') + '">' +
+    const stateCls = e.removesPoints ? ' removed' : (e.atRisk ? ' atrisk' : '');
+    return '<span class="booth-state' + stateCls + '">' +
       '<span class="bsh-label">Score</span>' +
       '<span class="bsh-before">' + esc(before) + '</span>' +
       '<span class="bsh-arrow">&#8594;</span>' +
-      '<span class="bsh-during">' + esc(during) + '</span>' +
+      '<span class="bsh-during' + stateCls + '">' + esc(during) + '</span>' +
       '<span class="bsh-arrow">&#8594;</span>' +
       '<span class="bsh-after' + (e.removesPoints ? ' removed' : '') + '">' + esc(after) + '</span>' +
       removedBadge +
+      riskBadge +
     '</span>' +
     related;
   }
@@ -823,19 +894,26 @@
     const rz = e.redZone
       ? '<span class="badge rz" title="Play started in the red zone (opponent&rsquo;s 20 or inside)">RZ</span>'
       : '';
+    const riskChip = (e.atRisk && !e.removesPoints)
+      ? '<span class="badge atrisk" title="A nearby score could still be taken off the board">PTS AT RISK</span>'
+      : '';
     const state = boothScoreTrailHTML(e, e.awayAbbr, e.homeAbbr);
     const aria = esc(e.shortName) + ', ' + esc(kind) + ': ' + esc(e.text) +
       (e.removesPoints ? ', removed ' + esc(e.pointsRemoved) + ' points' : '') +
+      (e.atRisk && !e.removesPoints ? ', ' + esc(e.pointsAtRisk) + ' points at risk' : '') +
       (e.redZone ? ', in the red zone' : '') +
       '. Open this game.';
     return '' +
       '<button type="button" class="booth-msg day-msg ' + esc(e.kind) +
+        (e.atRisk && !e.removesPoints ? ' atrisk' : '') +
+        (e.removesPoints ? ' pts-removed' : '') +
         '" data-id="' + esc(e.gameId) + '" aria-label="' + aria + '">' +
         '<span class="booth-msg-top">' +
           '<span class="day-game">' + esc(e.shortName) + '</span>' +
           liveTag +
           '<span class="badge ' + esc(e.kind) + '">' + esc(kind) + '</span>' +
           rz +
+          riskChip +
           (result ? '<span class="badge result ' + esc(e.result) + '">' + esc(result) + '</span>' : '') +
           '<span class="booth-when">' + esc(when) + '</span>' +
           (score ? '<span class="booth-score">' + score + '</span>' : '') +
@@ -1010,12 +1088,9 @@
 
   function boothHTML(events) {
     const filter = state.boothFilter || 'all';
-    const counts = { all: events.length, penalty: 0, challenge: 0, replay: 0, review: 0 };
-    events.forEach(function (e) {
-      if (counts[e.kind] != null) counts[e.kind] += 1;
-    });
+    const counts = boothKindCounts(events);
     const visible = events.filter(function (e) {
-      return filter === 'all' || e.kind === filter;
+      return boothEventShown(e, filter);
     });
 
     const newIds = [];
@@ -1035,29 +1110,22 @@
       });
     }
 
-    const filters = [
-      ['all', 'All'],
-      ['penalty', 'Flags'],
-      ['challenge', 'Challenges'],
-      ['replay', 'Replay'],
-      ['review', 'Under review']
-    ].map(function (pair) {
-      const id = pair[0], label = pair[1];
-      const n = counts[id];
-      const extra = id === 'all' ? '' : ' · ' + n;
-      return '<button type="button" class="booth-filter' + (filter === id ? ' active' : '') +
-        '" data-booth-filter="' + id + '"' +
-        (n === 0 && id !== 'all' ? ' disabled' : '') + '>' +
-        esc(label) + extra + '</button>';
-    }).join('');
+    const filters = boothFiltersHTML(filter, counts, 'data-booth-filter', '');
 
     const lastPlay = liveLastPlay();
     const lastText = lastPlay ? (lastPlay.text || lastPlay.shortText || '') : '';
     const livePending = !!(current() && current().status && current().status.state === 'in' && lastPlay &&
       (NFLMap.classifyBooth(lastPlay) === 'review' || NFLMap.boothResult(lastText) === 'pending'));
+    // When the play under review carries points (e.g. a ruled touchdown
+    // waiting on the verdict), shout that from the banner too.
+    const lastEvent = events.length ? events[events.length - 1] : null;
+    const bannerRisk = (livePending && lastEvent && lastEvent.atRisk && !lastEvent.removesPoints)
+      ? '<span class="badge atrisk">' + esc(lastEvent.pointsAtRisk) + ' PTS AT RISK</span>'
+      : '';
     const banner = livePending
       ? '<div class="booth-banner" role="status">' +
           '<span class="badge review">UNDER REVIEW</span>' +
+          bannerRisk +
           '<span>' + esc(lastText) + '</span>' +
         '</div>'
       : '';
@@ -1076,9 +1144,9 @@
     // Literal arrows (not &rarr; entities): foot passes through esc() below.
     const live = current() && current().status && current().status.state === 'in';
     const foot = live
-      ? 'Live booth log · pulled from ESPN play-by-play · tracks score before → during → after when points are removed · ' +
+      ? 'Live booth log · pulled from ESPN play-by-play · tracks score before → during → after when points are removed or at risk · ' +
         LIVE_REVIEW_SECONDS + 's polling schedule'
-      : 'Booth log · pulled from ESPN play-by-play · tracks score before → during → after when points are removed';
+      : 'Booth log · pulled from ESPN play-by-play · tracks score before → during → after when points are removed or at risk';
 
     return '<div class="booth">' +
       '<div class="booth-head">' +
@@ -1119,13 +1187,19 @@
     const rz = e.redZone
       ? '<span class="badge rz" title="Play started in the red zone (opponent&rsquo;s 20 or inside)">RZ</span>'
       : '';
+    const riskChip = (e.atRisk && !e.removesPoints)
+      ? '<span class="badge atrisk" title="A nearby score could still be taken off the board">PTS AT RISK</span>'
+      : '';
     return '' +
-      '<article class="booth-msg ' + esc(e.kind) + (isNew ? ' new' : '') + '">' +
+      '<article class="booth-msg ' + esc(e.kind) + (isNew ? ' new' : '') +
+        (e.atRisk && !e.removesPoints ? ' atrisk' : '') +
+        (e.removesPoints ? ' pts-removed' : '') + '">' +
         '<div class="booth-msg-top">' +
           '<span class="booth-when">' + esc(when) + '</span>' +
           liveTag +
           '<span class="badge ' + esc(e.kind) + '">' + esc(kind) + '</span>' +
           rz +
+          riskChip +
           (result ? '<span class="badge result ' + esc(e.result) + '">' + esc(result) + '</span>' : '') +
           '<span class="booth-score">' + score + '</span>' +
         '</div>' +
@@ -1168,29 +1242,12 @@
 
   function redZoneHTML(events) {
     const filter = state.redZoneFilter || 'all';
-    const counts = { all: events.length, penalty: 0, challenge: 0, replay: 0, review: 0 };
-    events.forEach(function (e) {
-      if (counts[e.kind] != null) counts[e.kind] += 1;
-    });
+    const counts = boothKindCounts(events);
     const visible = events.filter(function (e) {
-      return filter === 'all' || e.kind === filter;
+      return boothEventShown(e, filter);
     });
 
-    const filters = [
-      ['all', 'All'],
-      ['penalty', 'Flags'],
-      ['challenge', 'Challenges'],
-      ['replay', 'Replay'],
-      ['review', 'Under review']
-    ].map(function (pair) {
-      const id = pair[0], label = pair[1];
-      const n = counts[id];
-      const extra = id === 'all' ? '' : ' · ' + n;
-      return '<button type="button" class="booth-filter' + (filter === id ? ' active' : '') +
-        '" data-redzone-filter="' + id + '"' +
-        (n === 0 && id !== 'all' ? ' disabled' : '') + '>' +
-        esc(label) + extra + '</button>';
-    }).join('');
+    const filters = boothFiltersHTML(filter, counts, 'data-redzone-filter', '');
 
     let body;
     if (!visible.length) {
@@ -1204,7 +1261,7 @@
     const live = current() && current().status && current().status.state === 'in';
     // Literal arrow: foot passes through esc() below.
     const foot = 'Flags, challenges & replay reviews on plays that started in the ' +
-      'opponent’s 20 or inside · pulled from ESPN play-by-play' +
+      'opponent’s 20 or inside · tracks points removed or at risk · pulled from ESPN play-by-play' +
       (live ? ' · updated every ' + LIVE_REVIEW_SECONDS + 's while live' : '');
 
     return '<div class="booth">' +
@@ -1399,6 +1456,7 @@
     state.daySummaries = {};
     state.summaryRequests = {};
     state.dayFeed = { items: [], primed: false };
+    state.dayBoothRisk = {};
     state.dayBoothFilter = 'all';
     state.alertedBoothKeys = {};
     $('day-booth').classList.add('hidden');
