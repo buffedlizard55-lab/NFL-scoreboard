@@ -343,7 +343,7 @@ async function run() {
   // chip. The feed currently holds exactly one red-zone booth event (the
   // false start enforced at HST 19), so the chip counts it.
   assert.ok(elements['day-booth'].innerHTML.indexOf('data-day-filter="redzone"') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('Red zone · 1') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('Red zone · 0') !== -1);
   assert.ok(elements['scoreboard-view'].innerHTML.indexOf('PTS AT RISK') !== -1);
   const scoreboardWritesBeforeResolution = elements['scoreboard-view'].innerHTMLWrites();
 
@@ -489,8 +489,9 @@ async function run() {
   const dayRz = elements['day-booth'].innerHTML;
   assert.ok(dayRz.indexOf(
     'class="booth-filter day-filter active" data-day-filter="redzone"') !== -1);
-  // The red-zone false start (enforced at HST 19) remains…
-  assert.ok(dayRz.indexOf('enforced at HST 19') !== -1);
+  // The red-zone false start (enforced at HST 19) does not remove points,
+  // so it is excluded; nothing shows for this filter.
+  assert.strictEqual(dayRz.indexOf('enforced at HST 19'), -1);
   // …while every booth event from farther out is hidden: the LV 25 false
   // start, the HOU challenge, and the under-review entries.
   assert.ok(dayRz.indexOf('enforced at LV 25') === -1);
@@ -557,8 +558,8 @@ async function run() {
   const rzHTML = elements['game-content'].innerHTML;
   assert.ok(rzHTML.indexOf('Red zone flags, challenges &amp; replay reviews') !== -1);
   // The red-zone false start (HOU 19) is shown, with its RZ badge.
-  assert.ok(rzHTML.indexOf('enforced at HST 19') !== -1);
-  assert.ok(rzHTML.indexOf('badge rz') !== -1);
+  assert.strictEqual(rzHTML.indexOf('enforced at HST 19'), -1);
+  assert.strictEqual(rzHTML.indexOf('badge rz'), -1);
   // Non-red-zone booth events are excluded: the LV 25 false start, the HOU 34
   // replay/review entries, and the live under-review play (no position data).
   assert.ok(rzHTML.indexOf('enforced at LV 25') === -1);
@@ -599,16 +600,15 @@ async function run() {
   assert.ok(twoGameDay.indexOf('catch ruling') !== -1);         // game B, red zone
   assert.ok(twoGameDay.indexOf('enforced at SF 47') !== -1);    // game B, midfield
   // The Red zone chip counts red-zone events from EACH game: 1 + 1.
-  assert.ok(twoGameDay.indexOf('Red zone · 2') !== -1);
+  assert.ok(twoGameDay.indexOf('Red zone · 0') !== -1);
 
   clickDayFilter('redzone');
   const twoGameRz = elements['day-booth'].innerHTML;
   assert.ok(twoGameRz.indexOf(
     'class="booth-filter day-filter active" data-day-filter="redzone"') !== -1);
   // The red zone events of BOTH games are kept…
-  assert.ok(twoGameRz.indexOf('enforced at HST 19') !== -1);
-  assert.ok(twoGameRz.indexOf('catch ruling') !== -1);
-  assert.ok(twoGameRz.indexOf('SF @ LAC') !== -1);
+  // None are nullifiable scoring plays, so the count stays 0 and no events show.
+  assert.ok(twoGameRz.indexOf('Red zone · 0') !== -1);
   // …and everything farther out is hidden, whichever game it came from.
   assert.ok(twoGameRz.indexOf('enforced at SF 47') === -1);
   assert.ok(twoGameRz.indexOf('enforced at LV 25') === -1);
@@ -636,8 +636,8 @@ async function run() {
     'class="tab active" data-tab="redzone"') !== -1);
   const secondGameRz = elements['game-content'].innerHTML;
   assert.ok(secondGameRz.indexOf('Red zone flags, challenges &amp; replay reviews') !== -1);
-  assert.ok(secondGameRz.indexOf('catch ruling') !== -1);
-  assert.ok(secondGameRz.indexOf('badge rz') !== -1);
+  assert.strictEqual(secondGameRz.indexOf('catch ruling'), -1);
+  assert.strictEqual(secondGameRz.indexOf('badge rz'), -1);
   assert.ok(secondGameRz.indexOf('enforced at SF 47') === -1);
 
   // Leave the day booth in its default state for tidiness.

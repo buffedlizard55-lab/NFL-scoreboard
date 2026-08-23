@@ -57,8 +57,19 @@
    * tab already IS this cut for one game. */
   const DAY_BOOTH_FILTERS = BOOTH_FILTERS.concat([['redzone', 'Red zone']]);
 
+  function nullifiableScoringText(text) {
+    const t = String(text || '').toLowerCase();
+    return /\btouchdown\b/.test(t) || /\bfield goal\b/.test(t) ||
+      /\bextra point\b/.test(t) || /\b(two-point|2-point)\b/.test(t) ||
+      /\bsafety\b/.test(t);
+  }
+
   function boothEventAtRisk(e) {
-    return !!(e && (e.atRisk || e.removesPoints));
+    if (!e) return false;
+    if (e.removesPoints) return true;
+    if (!e.atRisk) return false;
+    const scoringText = (e.relatedScoringPlay && (e.relatedScoringPlay.text || e.relatedScoringPlay.type)) || (e.text || '');
+    return nullifiableScoringText(scoringText);
   }
 
   function boothKindCounts(events) {
@@ -66,7 +77,7 @@
     events.forEach(function (e) {
       if (e && e.kind != null && counts[e.kind] != null) counts[e.kind] += 1;
       if (boothEventAtRisk(e)) counts.risk += 1;
-      if (e && e.redZone) counts.redzone += 1;
+      if (e && e.redZone && boothEventAtRisk(e)) counts.redzone += 1;
     });
     return counts;
   }
@@ -74,7 +85,7 @@
   function boothEventShown(e, filter) {
     if (!filter || filter === 'all') return true;
     if (filter === 'risk') return boothEventAtRisk(e);
-    if (filter === 'redzone') return !!e.redZone;
+    if (filter === 'redzone') return !!(e.redZone && boothEventAtRisk(e));
     return e.kind === filter;
   }
 
@@ -1311,7 +1322,7 @@
     const events = NFLMap.boothEvents(
       state.summary && state.summary.drives,
       liveLastPlay()
-    ).filter(function (e) { return e.redZone; });
+    ).filter(function (e) { return e.redZone && boothEventAtRisk(e); });
     const feed = el.querySelector('.booth-feed');
     const prevScroll = feed ? feed.scrollTop : 0;
     const nearBottom = !feed ||
