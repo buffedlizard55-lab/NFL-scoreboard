@@ -442,6 +442,213 @@ ok('boothScoreEffect / boothEventContext: null and out-of-range safety', functio
   assert.strictEqual(NFLMap.boothEventContext({ id: 'x' }, [], -1).removesPoints, false);
 });
 
+// 8a. Points at risk: a flag/review that COULD still remove points -------
+ok('boothPointsAtRisk: a pending review right after a touchdown is at risk', function () {
+  // The exact live moment: touchdown ruled, review open, ESPN has not
+  // published any score drop yet. Nothing was removed yet — but 7 points
+  // are on the board and could come off.
+  const plays = [
+    { id: 'p1', sequenceNumber: '100', type: { text: 'Rush' },
+      text: 'D.Carter 3 yard run, TOUCHDOWN.', awayScore: 7, homeScore: 0,
+      scoringPlay: true, isPenalty: false },
+    { id: 'p2', sequenceNumber: '200', type: { text: 'Pass Reception' },
+      text: 'Play under review.', awayScore: 7, homeScore: 0,
+      scoringPlay: false, isPenalty: false }
+  ];
+  const event = NFLMap.boothEventContext(NFLMap.boothEvent(plays[1]), plays, 1);
+  assert.strictEqual(event.atRisk, true);
+  assert.strictEqual(event.pointsAtRisk, 7);
+  assert.strictEqual(event.atRiskTeam, 'away');
+  assert.strictEqual(event.removesPoints, false);
+  assert.strictEqual(event.relatedScoringPlay.id, 'p1');
+  assert.strictEqual(event.relatedScoringPlay.text, 'D.Carter 3 yard run, TOUCHDOWN.');
+});
+
+ok('boothPointsAtRisk: cleared once the verdict takes the points off (removesPoints wins)', function () {
+  const pending = [
+    { id: 'p1', sequenceNumber: '100', type: { text: 'Rush' },
+      text: 'D.Carter 3 yard run, TOUCHDOWN.', awayScore: 7, homeScore: 0,
+      scoringPlay: true, isPenalty: false },
+    { id: 'p2', sequenceNumber: '200', type: { text: 'Pass Reception' },
+      text: 'Play under review.', awayScore: 7, homeScore: 0,
+      scoringPlay: false, isPenalty: false }
+  ];
+  const live = NFLMap.boothEventContext(NFLMap.boothEvent(pending[1]), pending, 1);
+  assert.strictEqual(live.atRisk, true);
+
+  const resolved = pending.concat([
+    { id: 'p3', sequenceNumber: '300', type: { text: 'Replay Review' },
+      text: 'The replay official reviewed the ruling, and the play was REVERSED. Runner short of the goal line.',
+      awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false }
+  ]);
+  const after = NFLMap.boothEvents({ previous: [{ id: 'd', team: { abbreviation: 'LV' }, plays: resolved }] });
+  assert.strictEqual(after[0].removesPoints, true);
+  assert.strictEqual(after[0].atRisk, false); // completed rollback, not a possibility
+  assert.strictEqual(after[1].removesPoints, true);
+  assert.strictEqual(after[1].atRisk, false);
+});
+
+ok('boothPointsAtRisk: live under-review overlay without score fields is still at risk', function () {
+  // A live situation.lastPlay often omits the running score; the risk scan
+  // must not invent a drop, but must still see the fresh touchdown.
+  const drives = { previous: [{ id: 'd', team: { abbreviation: 'LV' }, plays: [
+    { id: 'p1', sequenceNumber: '100', type: { text: 'Rush' },
+      text: 'D.Carter 3 yard run, TOUCHDOWN.', awayScore: 7, homeScore: 0,
+      scoringPlay: true, isPenalty: false }
+  ] }] };
+  const lastPlay = {
+    id: 'live-1',
+    text: 'Play under review.',
+    type: { text: 'Pass Reception' },
+    isPenalty: false
+  };
+  const events = NFLMap.boothEvents(drives, lastPlay);
+  const live = events.filter(function (e) { return e.live; })[0];
+  assert.ok(live);
+  assert.strictEqual(live.atRisk, true);
+  assert.strictEqual(live.pointsAtRisk, 7);
+  assert.strictEqual(live.removesPoints, false);
+});
+
+ok('boothPointsAtRisk: a flag after a field goal is at risk until the drop publishes', function () {
+  const pending = [
+    { id: 'f1', sequenceNumber: '100', type: { text: 'Field Goal' },
+      text: 'K.Matsuzawa 43 yard field goal is GOOD.', awayScore: 3, homeScore: 0,
+      scoringPlay: true, isPenalty: false },
+    { id: 'f2', sequenceNumber: '200', type: { text: 'Penalty' },
+      text: 'PENALTY on LV-T.Miller, Offensive Holding, 10 yards, enforced at LV 43 - No Play.',
+      awayScore: 3, homeScore: 0, scoringPlay: false, isPenalty: true,
+      penalty: { yards: 10, type: { text: 'Offensive Holding' } } }
+  ];
+  const live = NFLMap.boothEventContext(NFLMap.boothEvent(pending[1]), pending, 1);
+  assert.strictEqual(live.atRisk, true);
+  assert.strictEqual(live.pointsAtRisk, 3);
+
+  // The moment ESPN publishes the corrected running score, the at-risk flag
+  // hands over to removesPoints.
+  pending[1].awayScore = 0;
+  const dropped = NFLMap.boothEventContext(NFLMap.boothEvent(pending[1]), pending, 1);
+  assert.strictEqual(dropped.removesPoints, true);
+  assert.strictEqual(dropped.pointsRemoved, 3);
+  assert.strictEqual(dropped.atRisk, false);
+});
+
+ok('boothPointsAtRisk: settled-safe outcomes are never at risk', function () {
+  const base = [
+    { id: 's1', sequenceNumber: '100', type: { text: 'Rush' },
+      text: 'K.Cole 4 yard TD run.', awayScore: 7, homeScore: 0,
+      scoringPlay: true, isPenalty: false }
+  ];
+  const cases = [
+    { id: 's2', sequenceNumber: '200', type: { text: 'Pass Reception' },
+      text: 'Houston challenged the ruling, and the play was Upheld.',
+      awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: false },
+    { id: 's2', sequenceNumber: '200', type: { text: 'Penalty' },
+      text: 'PENALTY on HOU-D.Thomas, Defensive Offside, 5 yards, declined.',
+      awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: true },
+    { id: 's2', sequenceNumber: '200', type: { text: 'Penalty' },
+      text: 'PENALTY on LV-X, Holding, 10 yards, Offset.',
+      awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: true }
+  ];
+  cases.forEach(function (followUp) {
+    const plays = base.concat([followUp]);
+    const event = NFLMap.boothEventContext(NFLMap.boothEvent(followUp), plays, 1);
+    assert.strictEqual(event.atRisk, false,
+      'result "' + event.result + '" must settle the score');
+    assert.strictEqual(event.removesPoints, false);
+  });
+});
+
+ok('boothPointsAtRisk: the ensuing kickoff settles the score', function () {
+  // Flags on the kickoff or the kick return can no longer remove the points
+  // already on the board, so they must not light up the at-risk badge.
+  const plays = [
+    { id: 'a1', sequenceNumber: '100', type: { text: 'Rush' },
+      text: 'K.Cole 4 yard TD run.', awayScore: 6, homeScore: 0,
+      scoringPlay: true, isPenalty: false },
+    { id: 'a2', sequenceNumber: '200', type: { text: 'Extra Point' },
+      text: 'K.Matsuzawa extra point is good.', awayScore: 7, homeScore: 0,
+      scoringPlay: true, isPenalty: false },
+    { id: 'a3', sequenceNumber: '300', type: { text: 'Kickoff' },
+      text: 'K.Matsuzawa kicks 65 yards.', awayScore: 7, homeScore: 0,
+      scoringPlay: false, isPenalty: false },
+    { id: 'a4', sequenceNumber: '400', type: { text: 'Kick Return' },
+      text: 'T.Saunders to HST 26 for 22 yards.', awayScore: 7, homeScore: 0,
+      scoringPlay: false, isPenalty: false },
+    { id: 'a5', sequenceNumber: '500', type: { text: 'Penalty' },
+      text: 'PENALTY on LV-X, Holding, 10 yards.', awayScore: 7, homeScore: 0,
+      scoringPlay: false, isPenalty: true,
+      penalty: { yards: 10, type: { text: 'Holding' } } }
+  ];
+  const event = NFLMap.boothEventContext(NFLMap.boothEvent(plays[4]), plays, 4);
+  assert.strictEqual(event.atRisk, false);
+  assert.strictEqual(event.removesPoints, false);
+});
+
+ok('boothPointsAtRisk: only the first entries after a score are at risk', function () {
+  // Exactly BOOTH_AT_RISK_LOOKBACK (3) entries after the score: still at
+  // risk (e.g. the verdict entry of a review); one entry further: not.
+  const make = function (fillers) {
+    const plays = [
+      { id: 'b1', sequenceNumber: '100', type: { text: 'Rush' },
+        text: 'K.Cole 4 yard TD run.', awayScore: 7, homeScore: 0,
+        scoringPlay: true, isPenalty: false }
+    ];
+    for (let i = 0; i < fillers; i += 1) {
+      plays.push({
+        id: 'bf' + i, sequenceNumber: String(200 + i * 100), type: { text: 'Rush' },
+        text: 'W.Marks left tackle for 2 yards.', awayScore: 7, homeScore: 0,
+        scoringPlay: false, isPenalty: false
+      });
+    }
+    plays.push({
+      id: 'b9', sequenceNumber: '900', type: { text: 'Penalty' },
+      text: 'PENALTY on LV-X, Holding, 10 yards.', awayScore: 7, homeScore: 0,
+      scoringPlay: false, isPenalty: true,
+      penalty: { yards: 10, type: { text: 'Holding' } }
+    });
+    return plays;
+  };
+  const inWindow = NFLMap.boothEventContext(
+    NFLMap.boothEvent(make(2)[3]), make(2), 3); // score -> play -> play -> flag
+  assert.strictEqual(inWindow.atRisk, true);
+  const outOfWindow = NFLMap.boothEventContext(
+    NFLMap.boothEvent(make(3)[4]), make(3), 4); // one filler too far
+  assert.strictEqual(outOfWindow.atRisk, false);
+});
+
+ok('boothPointsAtRisk: points already taken off by an earlier event are not at risk again', function () {
+  const plays = [
+    { id: 'c1', sequenceNumber: '100', type: { text: 'Rush' },
+      text: 'K.Cole 4 yard TD run.', awayScore: 7, homeScore: 0,
+      scoringPlay: true, isPenalty: false },
+    { id: 'c2', sequenceNumber: '200', type: { text: 'Penalty' },
+      text: 'PENALTY on LV-X, Offensive Holding, 10 yards, enforced at LV 25 - No Play.',
+      awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: true,
+      penalty: { yards: 10, type: { text: 'Offensive Holding' } } },
+    { id: 'c3', sequenceNumber: '300', type: { text: 'Rush' },
+      text: 'W.Marks left tackle for 2 yards.', awayScore: 0, homeScore: 0,
+      scoringPlay: false, isPenalty: false },
+    { id: 'c4', sequenceNumber: '400', type: { text: 'Penalty' },
+      text: 'PENALTY on LV-Y, False Start, 5 yards.', awayScore: 0, homeScore: 0,
+      scoringPlay: false, isPenalty: true,
+      penalty: { yards: 5, type: { text: 'False Start' } } }
+  ];
+  const later = NFLMap.boothEventContext(NFLMap.boothEvent(plays[3]), plays, 3);
+  assert.strictEqual(later.atRisk, false); // those 7 points are already gone
+  assert.strictEqual(later.removesPoints, false);
+});
+
+ok('boothPointsAtRisk: null-safety and exported window constant', function () {
+  assert.strictEqual(NFLMap.BOOTH_AT_RISK_LOOKBACK, 3);
+  assert.deepStrictEqual(NFLMap.boothPointsAtRisk(null, null, 0, null), {
+    atRisk: false, points: 0, team: '', scoringPlay: null
+  });
+  assert.deepStrictEqual(
+    NFLMap.boothPointsAtRisk({ result: 'pending' }, [], 0, { removesPoints: false, during: { away: 0, home: 0 } }),
+    { atRisk: false, points: 0, team: '', scoringPlay: null });
+});
+
 // 8b. Red zone location (verified against real play fields) ----------------
 ok('isRedZonePlay: primary signal is start.yardsToEndzone (distance to driven end zone)', function () {
   // Real play shapes from event 401873286: "1st & 10 at HOU 19" (LV offense)

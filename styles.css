@@ -187,6 +187,20 @@ main {
 .badge.result.confirmed, .badge.result.stands { background: #e9f6ee; color: var(--win); }
 .badge.result.declined, .badge.result.offsetting { background: #eef1f5; color: var(--ink-2); }
 .badge.removed { background: #fff4d6; color: #92400e; }
+/* Points that could still come off the board (pending review, unresolved
+ * challenge/flag after a fresh score): orange, pulsing, impossible to miss. */
+.badge.atrisk {
+  background: #ffedd5;
+  color: #c2410c;
+  animation: atrisk-pulse 1.6s ease-in-out infinite;
+}
+@keyframes atrisk-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(194, 65, 12, .35); }
+  50%      { box-shadow: 0 0 0 4px rgba(194, 65, 12, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .badge.atrisk { animation: none; }
+}
 .badge .st-sub { font-weight: 600; margin-left: 4px; }
 
 .card-top { gap: 8px; flex-wrap: wrap; }
@@ -646,6 +660,16 @@ button:focus-visible {
 .booth-msg.challenge { border-left-color: #2563eb; }
 .booth-msg.replay { border-left-color: #7c3aed; }
 .booth-msg.review { border-left-color: var(--live); }
+/* Points in jeopardy / already taken: the whole message is tinted so the
+ * situation is visible while scanning the live feed. */
+.booth-msg.atrisk {
+  border-left-color: #ea580c;
+  background: #fffaf3;
+}
+.booth-msg.pts-removed {
+  border-left-color: #b45309;
+  background: #fffdf5;
+}
 .booth-msg.new { animation: booth-in .35s ease; }
 @keyframes booth-in {
   from { opacity: 0; transform: translateY(8px); }
@@ -689,6 +713,7 @@ button:focus-visible {
   color: var(--ink-2);
 }
 .booth-state.removed { border-top-color: #fcd34d; }
+.booth-state.atrisk { border-top-color: #fdba74; }
 .bsh-label {
   font-size: 10px;
   text-transform: uppercase;
@@ -699,7 +724,10 @@ button:focus-visible {
   font-variant-numeric: tabular-nums;
   color: var(--ink);
 }
-.bsh-after.removed { color: #b45309; }
+.bsh-after.removed, .bsh-during.removed { color: #b45309; }
+/* The "during" score is the one the points are counted in while the
+ * flag/review is still open. */
+.bsh-during.atrisk { color: #c2410c; }
 .bsh-arrow { color: #c4c9d2; }
 .booth-note {
   display: block;

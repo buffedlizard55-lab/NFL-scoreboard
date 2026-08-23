@@ -112,6 +112,30 @@ async function run() {
       }
     ]
   });
+  // A still-pending review of a ruled touchdown: exactly the live moment the
+  // points-at-risk highlight exists for. High sequence numbers keep it the
+  // game's newest booth entry (card badge); its running score continues from
+  // the fixture's Q4 plays (16-20) so the touchdown really adds points.
+  summary.drives.previous.push({
+    id: 'atrisk-td-drive',
+    description: 'fixture: touchdown under review (pending)',
+    result: 'No Play',
+    displayResult: 'No Play',
+    isScore: false,
+    team: { abbreviation: 'LV', displayName: 'Las Vegas Raiders', logos: [] },
+    plays: [
+      {
+        id: 'risk-1', sequenceNumber: '9000000', type: { text: 'Rush' },
+        text: 'D.Carter 3 yard run, TOUCHDOWN.', awayScore: 23, homeScore: 20,
+        scoringPlay: true, isPenalty: false
+      },
+      {
+        id: 'risk-2', sequenceNumber: '9000100', type: { text: 'Pass Reception' },
+        text: 'Play under review.', awayScore: 23, homeScore: 20,
+        scoringPlay: false, isPenalty: false
+      }
+    ]
+  });
 
   // Minimal Web Audio stand-in so the smoke test can verify the booth sound
   // button reaches the same buzz code path the alert system uses.
@@ -217,6 +241,14 @@ async function run() {
   // day feed; its non-red-zone counterpart (LV 25) does not.
   assert.ok(elements['day-booth'].innerHTML.indexOf('badge rz') !== -1);
   assert.ok(elements['day-booth'].innerHTML.indexOf('enforced at HST 19') !== -1);
+  // Points at risk: the pending review of the ruled touchdown is highlighted
+  // in the day feed, names the score it could wipe and its scoring play, is
+  // filterable, and is badged on the game card.
+  assert.ok(elements['day-booth'].innerHTML.indexOf('badge atrisk') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('LV 7 PTS AT RISK') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('D.Carter 3 yard run, TOUCHDOWN.') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('data-day-filter="risk"') !== -1);
+  assert.ok(elements['scoreboard-view'].innerHTML.indexOf('PTS AT RISK') !== -1);
   const scoreboardWritesBeforeResolution = elements['scoreboard-view'].innerHTMLWrites();
 
   // Two review ticks while one detail request is pending still create one fetch.
@@ -299,6 +331,48 @@ async function run() {
   assert.ok(elements['day-booth'].innerHTML.indexOf('&#128276; Sound On') !== -1);
   assert.ok(audio.oscillatorCount > 1, 're-enabling the sound plays the preview buzz again');
 
+  // A newly discovered flag right after a fresh touchdown is at risk and —
+  // unlike ordinary penalties — plays the alert buzz. (The game flips back
+  // to live for this: one scoreboard tick re-reads its status, and the next
+  // booth tick re-fetches its detail, resetting the cached final flag.)
+  competition.status.type.state = 'in';
+  competition.status.type.completed = false;
+  timers[0].callback(); // scoreboard refresh re-summarizes the game as live
+  await flush();
+  await flush();
+  const oscillatorsBeforeRisk = audio.oscillatorCount;
+  summary.drives.previous.push({
+    id: 'atrisk-penalty-drive',
+    description: 'fixture: flag after a touchdown',
+    result: 'No Play',
+    displayResult: 'No Play',
+    isScore: false,
+    team: { abbreviation: 'LV', displayName: 'Las Vegas Raiders', logos: [] },
+    plays: [
+      {
+        id: 'riskp-1', sequenceNumber: '9500000', type: { text: 'Rush' },
+        text: 'A.Okafor left end for 4 yards, TOUCHDOWN.', awayScore: 30, homeScore: 20,
+        scoringPlay: true, isPenalty: false
+      },
+      {
+        id: 'riskp-2', sequenceNumber: '9500100', type: { text: 'Penalty' },
+        text: 'PENALTY on LV-R.Jones, Offensive Holding, 10 yards, enforced at LV 16 - No Play.',
+        awayScore: 30, homeScore: 20,
+        scoringPlay: false, isPenalty: true,
+        penalty: { yards: 10, type: { text: 'Offensive Holding' } }
+      }
+    ]
+  });
+  timers[1].callback();
+  assert.strictEqual(pendingSummaries.length, 1);
+  pendingSummaries.shift()();
+  await flush();
+  await flush();
+  assert.ok(elements['day-booth'].innerHTML.indexOf('R.Jones') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('badge atrisk') !== -1);
+  assert.ok(audio.oscillatorCount > oscillatorsBeforeRisk,
+    'an at-risk penalty plays the alert buzz');
+
   // Open the game from the scoreboard card and switch to the Red Zone tab.
   // holdSummaries is still on, so the detail request parks in pendingSummaries.
   elements['scoreboard-view'].dispatch('click', {
@@ -366,6 +440,8 @@ async function run() {
   console.log('  ✓ idle final-game ticks do not rebuild an unchanged booth feed');
   console.log('  ✓ live review content renders from the supplied API-shaped payload');
   console.log('  ✓ the booth sound button toggles and plays the alert buzz');
+  console.log('  ✓ a pending review of a touchdown is badged POINTS AT RISK in feed and card');
+  console.log('  ✓ a newly appearing at-risk penalty triggers the alert buzz');
   console.log('  ✓ red-zone booth events carry the RZ badge in the all-games feed');
   console.log('  ✓ the Red Zone tab shows only red-zone flags/reviews, with working filters');
 }
