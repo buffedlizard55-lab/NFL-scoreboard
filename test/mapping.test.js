@@ -93,10 +93,10 @@ ok('playerStatTeams: rushing category', function () {
 // 4. Drives / play-by-play ---------------------------------------------
 ok('playsList: flatten + sort drives in chronological order', function () {
   const plays = NFLMap.playsList(sample.summary.drives);
-  assert.strictEqual(plays.length, 11);
+  assert.strictEqual(plays.length, 12);
   assert.strictEqual(plays[0].type.text, 'Kickoff');
   assert.strictEqual(plays[0].sequenceNumber, '3900');
-  assert.strictEqual(plays[10].sequenceNumber, '355600');
+  assert.strictEqual(plays[11].sequenceNumber, '355600');
 });
 
 ok('playRow: down/distance, scores, clock', function () {
@@ -199,9 +199,9 @@ ok('boothEvent: replay reversed, challenge upheld, under review pending', functi
 
 ok('boothEvents: only flagged plays, chronological, lastPlay de-duped', function () {
   const events = NFLMap.boothEvents(sample.summary.drives);
-  assert.strictEqual(events.length, 6);
+  assert.strictEqual(events.length, 7);
   assert.deepStrictEqual(events.map(function (e) { return e.kind; }),
-    ['penalty', 'penalty', 'replay', 'challenge', 'review', 'penalty']);
+    ['penalty', 'penalty', 'replay', 'challenge', 'review', 'penalty', 'penalty']);
 
   const last = {
     id: '4018732869005',
@@ -210,7 +210,7 @@ ok('boothEvents: only flagged plays, chronological, lastPlay de-duped', function
     isPenalty: false
   };
   const withLive = NFLMap.boothEvents(sample.summary.drives, last);
-  assert.strictEqual(withLive.length, 6);
+  assert.strictEqual(withLive.length, 7);
 
   const resolvedLast = {
     id: '4018732869005',
@@ -220,7 +220,7 @@ ok('boothEvents: only flagged plays, chronological, lastPlay de-duped', function
     isPenalty: false
   };
   const withResolution = NFLMap.boothEvents(sample.summary.drives, resolvedLast);
-  assert.strictEqual(withResolution.length, 6);
+  assert.strictEqual(withResolution.length, 7);
   assert.strictEqual(withResolution[4].kind, 'replay');
   assert.strictEqual(withResolution[4].result, 'overturned');
   assert.strictEqual(withResolution[4].text, resolvedLast.text);
@@ -232,9 +232,9 @@ ok('boothEvents: only flagged plays, chronological, lastPlay de-duped', function
     isPenalty: false
   };
   const extra = NFLMap.boothEvents(sample.summary.drives, other);
-  assert.strictEqual(extra.length, 7);
-  assert.strictEqual(extra[6].live, true);
-  assert.strictEqual(extra[6].kind, 'review');
+  assert.strictEqual(extra.length, 8);
+  assert.strictEqual(extra[7].live, true);
+  assert.strictEqual(extra[7].kind, 'review');
 });
 
 ok('boothResult: confirmed / stands / offsetting phrases', function () {
@@ -442,11 +442,126 @@ ok('boothScoreEffect / boothEventContext: null and out-of-range safety', functio
   assert.strictEqual(NFLMap.boothEventContext({ id: 'x' }, [], -1).removesPoints, false);
 });
 
-// 8a. Points at risk: a flag/review that COULD still remove points -------
-ok('boothPointsAtRisk: a pending review right after a touchdown is at risk', function () {
-  // The exact live moment: touchdown ruled, review open, ESPN has not
-  // published any score drop yet. Nothing was removed yet — but 7 points
-  // are on the board and could come off.
+// 8a. Nullified scores: the only thing the risk/red-zone feeds track --------
+// Every play string below is real ESPN/NFL play-by-play wording (Super Bowl
+// LIX, event 401671889, and NFL gamebook excerpts) — nothing is invented.
+
+ok('nullifiedScoreText: real "TOUCHDOWN NULLIFIED by Penalty" wording', function () {
+  // Verbatim from ESPN's Super Bowl LIX play-by-play (defensive foul).
+  assert.strictEqual(NFLMap.nullifiedScoreText(
+    'C.Gardner-Johnson for 98 yards, TOUCHDOWN NULLIFIED by Penalty.PENALTY on ' +
+    'PHI-J.Carter, Defensive Offside, 4 yards, enforced at PHI 36 - No Play.'), true);
+  // Verbatim from the same game (offensive foul).
+  assert.strictEqual(NFLMap.nullifiedScoreText(
+    'P.Mahomes pass short left to M.Brown for 4 yards, TOUCHDOWN NULLIFIED by ' +
+    'Penalty.PENALTY on KC-J.Smith-Schuster, Offensive Pass Interference, 10 ' +
+    'yards, enforced at PHI 4 - No Play.'), true);
+  // Gamebook variant with no punctuation between "Penalty" and "PENALTY":
+  // the detector must not depend on the punctuation.
+  assert.strictEqual(NFLMap.nullifiedScoreText(
+    'TOUCHDOWN NULLIFIED by Penalty PENALTY on NE-R.Gronkowski, Illegal Touch ' +
+    'Pass, 5 yards, enforced at NYJ 14 - No Play.'), true);
+});
+
+ok('nullifiedScoreText: a replay REVERSAL of a touchdown (no NULLIFIED token)', function () {
+  // Verbatim from Super Bowl LIX: the TD was wiped by review, and ESPN never
+  // writes the word "nullified" on this shape. This is the case the Red Zone
+  // tab must still catch.
+  assert.strictEqual(NFLMap.nullifiedScoreText(
+    '(Shotgun) J.Hurts pass deep right to J.Dotson for 28 yards, TOUCHDOWN.The ' +
+    'Replay Official reviewed the runner broke the plane ruling, and the play ' +
+    'was REVERSED.(Shotgun) J.Hurts pass deep right to J.Dotson to KC 1 for 27 ' +
+    'yards (J.Watson).'), true);
+  assert.strictEqual(NFLMap.nullifiedScoreText(
+    'The replay official reviewed the ruling, and the field goal was OVERTURNED.'), true);
+});
+
+ok('nullifiedScoreText: field goal, extra point and 2-point conversion wiped', function () {
+  assert.strictEqual(NFLMap.nullifiedScoreText(
+    'K.Matsuzawa 43 yard field goal is GOOD.PENALTY on LV-T.Miller, Offensive ' +
+    'Holding, 10 yards, enforced at LV 43 - No Play.'), true);
+  assert.strictEqual(NFLMap.nullifiedScoreText(
+    'H.Butker extra point is GOOD, EXTRA POINT NULLIFIED by Penalty.'), true);
+  assert.strictEqual(NFLMap.nullifiedScoreText(
+    'TWO-POINT CONVERSION ATTEMPT. J.Goff pass to T.Decker is complete. ' +
+    'ATTEMPT SUCCEEDS NULLIFIED by Penalty.'), true);
+  assert.strictEqual(NFLMap.nullifiedScoreText(
+    'J.Allen 2-point conversion run.PENALTY on BUF, Illegal Formation, 5 yards, ' +
+    'enforced at KC 2 - No Play.'), true);
+});
+
+ok('nullifiedScoreText: ordinary flags, reviews and scores are NOT nullifications', function () {
+  const notNullified = [
+    // An ordinary touchdown.
+    'D.Carter 3 yard run, TOUCHDOWN.',
+    // A "- No Play" penalty on a play that never scored.
+    'PENALTY on PHI-A.Brown, Offensive Pass Interference, 10 yards, enforced at 50 - No Play.',
+    'PENALTY on LV-Y, False Start, 5 yards, enforced at LV 25 - No Play.',
+    // A pending review carries no verdict at all.
+    'Play under review.',
+    // A verdict that KEPT the score.
+    'Houston challenged the ruling, and the play was Upheld.',
+    'The replay official reviewed the ruling, and the ruling on the field stands.',
+    // A declined flag after a score.
+    'PENALTY on HOU-D.Thomas, Defensive Offside, 5 yards, declined.',
+    // A reversal on a non-scoring play.
+    'The replay official reviewed the pass completion ruling, and the play was REVERSED. Pass incomplete.',
+    ''
+  ];
+  notNullified.forEach(function (text) {
+    assert.strictEqual(NFLMap.nullifiedScoreText(text), false,
+      'must not be a nullification: ' + text);
+  });
+  assert.strictEqual(NFLMap.nullifiedScoreText(null), false);
+  assert.strictEqual(NFLMap.nullifiedScoreText(undefined), false);
+});
+
+ok('boothEventNullifies: a published score drop is a nullification on its own', function () {
+  // removesPoints is authoritative even when the wording says nothing.
+  assert.strictEqual(NFLMap.boothEventNullifies(
+    { removesPoints: true, pointsRemoved: 7, text: 'PENALTY on LV-X, Holding, 10 yards.' }), true);
+  assert.strictEqual(NFLMap.boothEventNullifies(
+    { removesPoints: false, text: 'PENALTY on LV-X, Holding, 10 yards.' }), false);
+  assert.strictEqual(NFLMap.boothEventNullifies(null), false);
+});
+
+ok('boothEvent/boothEventContext: a nullified touchdown carries nullified = true', function () {
+  const plays = [
+    { id: 'n1', sequenceNumber: '100', type: { text: 'Penalty' },
+      text: 'C.Gardner-Johnson for 98 yards, TOUCHDOWN NULLIFIED by Penalty.' +
+        'PENALTY on PHI-J.Carter, Defensive Offside, 4 yards, enforced at PHI 36 - No Play.',
+      awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: true,
+      penalty: { yards: 4, type: { text: 'Defensive Offside' } },
+      start: { yardsToEndzone: 8, downDistanceText: '1st & Goal at KC 8' } }
+  ];
+  // Text-only verdict, before any score context is applied.
+  assert.strictEqual(NFLMap.boothEvent(plays[0]).nullified, true);
+  // And after enrichment, with the running score unchanged (ESPN never
+  // counted the points, so removesPoints stays false).
+  const event = NFLMap.boothEventContext(NFLMap.boothEvent(plays[0]), plays, 0);
+  assert.strictEqual(event.nullified, true);
+  assert.strictEqual(event.removesPoints, false);
+  assert.strictEqual(event.redZone, true); // 8 yards out — inside the 20
+});
+
+ok('boothEventContext: an ordinary flag is not nullified and never reaches the feeds', function () {
+  const plays = [
+    { id: 'o1', sequenceNumber: '100', type: { text: 'Rush' },
+      text: 'K.Cole 4 yard run.', awayScore: 0, homeScore: 0,
+      scoringPlay: false, isPenalty: false },
+    { id: 'o2', sequenceNumber: '200', type: { text: 'Penalty' },
+      text: 'PENALTY on LV-Y, False Start, 5 yards, enforced at LV 25 - No Play.',
+      awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: true,
+      penalty: { yards: 5, type: { text: 'False Start' } } }
+  ];
+  const event = NFLMap.boothEventContext(NFLMap.boothEvent(plays[1]), plays, 1);
+  assert.strictEqual(event.nullified, false);
+  assert.strictEqual(event.removesPoints, false);
+});
+
+ok('boothEventContext: a pending review after a touchdown is NOT a nullification yet', function () {
+  // The old "points at risk" feature lit this up; it is gone. Nothing has
+  // come off the board, so nothing is reported until the verdict arrives.
   const plays = [
     { id: 'p1', sequenceNumber: '100', type: { text: 'Rush' },
       text: 'D.Carter 3 yard run, TOUCHDOWN.', awayScore: 7, homeScore: 0,
@@ -455,113 +570,23 @@ ok('boothPointsAtRisk: a pending review right after a touchdown is at risk', fun
       text: 'Play under review.', awayScore: 7, homeScore: 0,
       scoringPlay: false, isPenalty: false }
   ];
-  const event = NFLMap.boothEventContext(NFLMap.boothEvent(plays[1]), plays, 1);
-  assert.strictEqual(event.atRisk, true);
-  assert.strictEqual(event.pointsAtRisk, 7);
-  assert.strictEqual(event.atRiskTeam, 'away');
-  assert.strictEqual(event.removesPoints, false);
-  assert.strictEqual(event.relatedScoringPlay.id, 'p1');
-  assert.strictEqual(event.relatedScoringPlay.text, 'D.Carter 3 yard run, TOUCHDOWN.');
-});
-
-ok('boothPointsAtRisk: cleared once the verdict takes the points off (removesPoints wins)', function () {
-  const pending = [
-    { id: 'p1', sequenceNumber: '100', type: { text: 'Rush' },
-      text: 'D.Carter 3 yard run, TOUCHDOWN.', awayScore: 7, homeScore: 0,
-      scoringPlay: true, isPenalty: false },
-    { id: 'p2', sequenceNumber: '200', type: { text: 'Pass Reception' },
-      text: 'Play under review.', awayScore: 7, homeScore: 0,
-      scoringPlay: false, isPenalty: false }
-  ];
-  const live = NFLMap.boothEventContext(NFLMap.boothEvent(pending[1]), pending, 1);
-  assert.strictEqual(live.atRisk, true);
-
-  const resolved = pending.concat([
+  const pending = NFLMap.boothEventContext(NFLMap.boothEvent(plays[1]), plays, 1);
+  assert.strictEqual(pending.nullified, false);
+  assert.strictEqual(pending.removesPoints, false);
+  // The verdict lands and the score drops: now both entries report it.
+  const resolved = plays.concat([
     { id: 'p3', sequenceNumber: '300', type: { text: 'Replay Review' },
       text: 'The replay official reviewed the ruling, and the play was REVERSED. Runner short of the goal line.',
       awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false }
   ]);
-  const after = NFLMap.boothEvents({ previous: [{ id: 'd', team: { abbreviation: 'LV' }, plays: resolved }] });
-  assert.strictEqual(after[0].removesPoints, true);
-  assert.strictEqual(after[0].atRisk, false); // completed rollback, not a possibility
-  assert.strictEqual(after[1].removesPoints, true);
-  assert.strictEqual(after[1].atRisk, false);
+  const events = NFLMap.boothEvents({ previous: [{ id: 'd', team: { abbreviation: 'LV' }, plays: resolved }] });
+  assert.strictEqual(events[0].removesPoints, true);
+  assert.strictEqual(events[0].nullified, true);
+  assert.strictEqual(events[1].removesPoints, true);
+  assert.strictEqual(events[1].nullified, true);
 });
 
-ok('boothPointsAtRisk: live under-review overlay without score fields is still at risk', function () {
-  // A live situation.lastPlay often omits the running score; the risk scan
-  // must not invent a drop, but must still see the fresh touchdown.
-  const drives = { previous: [{ id: 'd', team: { abbreviation: 'LV' }, plays: [
-    { id: 'p1', sequenceNumber: '100', type: { text: 'Rush' },
-      text: 'D.Carter 3 yard run, TOUCHDOWN.', awayScore: 7, homeScore: 0,
-      scoringPlay: true, isPenalty: false }
-  ] }] };
-  const lastPlay = {
-    id: 'live-1',
-    text: 'Play under review.',
-    type: { text: 'Pass Reception' },
-    isPenalty: false
-  };
-  const events = NFLMap.boothEvents(drives, lastPlay);
-  const live = events.filter(function (e) { return e.live; })[0];
-  assert.ok(live);
-  assert.strictEqual(live.atRisk, true);
-  assert.strictEqual(live.pointsAtRisk, 7);
-  assert.strictEqual(live.removesPoints, false);
-});
-
-ok('boothPointsAtRisk: a flag after a field goal is at risk until the drop publishes', function () {
-  const pending = [
-    { id: 'f1', sequenceNumber: '100', type: { text: 'Field Goal' },
-      text: 'K.Matsuzawa 43 yard field goal is GOOD.', awayScore: 3, homeScore: 0,
-      scoringPlay: true, isPenalty: false },
-    { id: 'f2', sequenceNumber: '200', type: { text: 'Penalty' },
-      text: 'PENALTY on LV-T.Miller, Offensive Holding, 10 yards, enforced at LV 43 - No Play.',
-      awayScore: 3, homeScore: 0, scoringPlay: false, isPenalty: true,
-      penalty: { yards: 10, type: { text: 'Offensive Holding' } } }
-  ];
-  const live = NFLMap.boothEventContext(NFLMap.boothEvent(pending[1]), pending, 1);
-  assert.strictEqual(live.atRisk, true);
-  assert.strictEqual(live.pointsAtRisk, 3);
-
-  // The moment ESPN publishes the corrected running score, the at-risk flag
-  // hands over to removesPoints.
-  pending[1].awayScore = 0;
-  const dropped = NFLMap.boothEventContext(NFLMap.boothEvent(pending[1]), pending, 1);
-  assert.strictEqual(dropped.removesPoints, true);
-  assert.strictEqual(dropped.pointsRemoved, 3);
-  assert.strictEqual(dropped.atRisk, false);
-});
-
-ok('boothPointsAtRisk: settled-safe outcomes are never at risk', function () {
-  const base = [
-    { id: 's1', sequenceNumber: '100', type: { text: 'Rush' },
-      text: 'K.Cole 4 yard TD run.', awayScore: 7, homeScore: 0,
-      scoringPlay: true, isPenalty: false }
-  ];
-  const cases = [
-    { id: 's2', sequenceNumber: '200', type: { text: 'Pass Reception' },
-      text: 'Houston challenged the ruling, and the play was Upheld.',
-      awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: false },
-    { id: 's2', sequenceNumber: '200', type: { text: 'Penalty' },
-      text: 'PENALTY on HOU-D.Thomas, Defensive Offside, 5 yards, declined.',
-      awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: true },
-    { id: 's2', sequenceNumber: '200', type: { text: 'Penalty' },
-      text: 'PENALTY on LV-X, Holding, 10 yards, Offset.',
-      awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: true }
-  ];
-  cases.forEach(function (followUp) {
-    const plays = base.concat([followUp]);
-    const event = NFLMap.boothEventContext(NFLMap.boothEvent(followUp), plays, 1);
-    assert.strictEqual(event.atRisk, false,
-      'result "' + event.result + '" must settle the score');
-    assert.strictEqual(event.removesPoints, false);
-  });
-});
-
-ok('boothPointsAtRisk: the ensuing kickoff settles the score', function () {
-  // Flags on the kickoff or the kick return can no longer remove the points
-  // already on the board, so they must not light up the at-risk badge.
+ok('boothEventContext: a flag on the ensuing kickoff is not a nullification', function () {
   const plays = [
     { id: 'a1', sequenceNumber: '100', type: { text: 'Rush' },
       text: 'K.Cole 4 yard TD run.', awayScore: 6, homeScore: 0,
@@ -572,88 +597,49 @@ ok('boothPointsAtRisk: the ensuing kickoff settles the score', function () {
     { id: 'a3', sequenceNumber: '300', type: { text: 'Kickoff' },
       text: 'K.Matsuzawa kicks 65 yards.', awayScore: 7, homeScore: 0,
       scoringPlay: false, isPenalty: false },
-    { id: 'a4', sequenceNumber: '400', type: { text: 'Kick Return' },
-      text: 'T.Saunders to HST 26 for 22 yards.', awayScore: 7, homeScore: 0,
-      scoringPlay: false, isPenalty: false },
-    { id: 'a5', sequenceNumber: '500', type: { text: 'Penalty' },
+    { id: 'a4', sequenceNumber: '400', type: { text: 'Penalty' },
       text: 'PENALTY on LV-X, Holding, 10 yards.', awayScore: 7, homeScore: 0,
       scoringPlay: false, isPenalty: true,
       penalty: { yards: 10, type: { text: 'Holding' } } }
   ];
-  const event = NFLMap.boothEventContext(NFLMap.boothEvent(plays[4]), plays, 4);
-  assert.strictEqual(event.atRisk, false);
+  const event = NFLMap.boothEventContext(NFLMap.boothEvent(plays[3]), plays, 3);
+  assert.strictEqual(event.nullified, false);
   assert.strictEqual(event.removesPoints, false);
 });
 
-ok('boothPointsAtRisk: only the first entries after a score are at risk', function () {
-  // Exactly BOOTH_AT_RISK_LOOKBACK (now 6) entries after the score: still at
-  // risk (e.g. the verdict entry of a review); one entry further: not.
-  // The window was expanded from 3 to 6 to catch delayed booth reviews that
-  // happen after the PAT, after a timeout, or after a couple of procedural
-  // plays but still before the kickoff. The kickoff-settles rule prevents
-  // false positives once the ball is kicked.
-  const make = function (fillers) {
-    const plays = [
-      { id: 'b1', sequenceNumber: '100', type: { text: 'Rush' },
-        text: 'K.Cole 4 yard TD run.', awayScore: 7, homeScore: 0,
-        scoringPlay: true, isPenalty: false }
-    ];
-    for (let i = 0; i < fillers; i += 1) {
-      plays.push({
-        id: 'bf' + i, sequenceNumber: String(200 + i * 100), type: { text: 'Rush' },
-        text: 'W.Marks left tackle for 2 yards.', awayScore: 7, homeScore: 0,
-        scoringPlay: false, isPenalty: false
-      });
-    }
-    plays.push({
-      id: 'b9', sequenceNumber: '900', type: { text: 'Penalty' },
-      text: 'PENALTY on LV-X, Holding, 10 yards.', awayScore: 7, homeScore: 0,
-      scoringPlay: false, isPenalty: true,
-      penalty: { yards: 10, type: { text: 'Holding' } }
-    });
-    return plays;
-  };
-  const lb = NFLMap.BOOTH_AT_RISK_LOOKBACK;
-  const inWindow = NFLMap.boothEventContext(
-    NFLMap.boothEvent(make(lb - 1)[lb]), make(lb - 1), lb); // score + (lb-1) fillers + flag = lb steps
-  assert.strictEqual(inWindow.atRisk, true);
-  const outOfWindow = NFLMap.boothEventContext(
-    NFLMap.boothEvent(make(lb)[lb + 1]), make(lb), lb + 1); // one filler too far
-  assert.strictEqual(outOfWindow.atRisk, false);
-});
-
-ok('boothPointsAtRisk: points already taken off by an earlier event are not at risk again', function () {
+ok('boothEventContext: a published score drop is reported even without nullified wording', function () {
   const plays = [
-    { id: 'c1', sequenceNumber: '100', type: { text: 'Rush' },
-      text: 'K.Cole 4 yard TD run.', awayScore: 7, homeScore: 0,
+    { id: 'f1', sequenceNumber: '100', type: { text: 'Field Goal' },
+      text: 'K.Matsuzawa 43 yard field goal is GOOD.', awayScore: 3, homeScore: 0,
       scoringPlay: true, isPenalty: false },
-    { id: 'c2', sequenceNumber: '200', type: { text: 'Penalty' },
-      text: 'PENALTY on LV-X, Offensive Holding, 10 yards, enforced at LV 25 - No Play.',
+    { id: 'f2', sequenceNumber: '200', type: { text: 'Penalty' },
+      text: 'PENALTY on LV-T.Miller, Offensive Holding, 10 yards, enforced at LV 43.',
       awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: true,
-      penalty: { yards: 10, type: { text: 'Offensive Holding' } } },
-    { id: 'c3', sequenceNumber: '300', type: { text: 'Rush' },
-      text: 'W.Marks left tackle for 2 yards.', awayScore: 0, homeScore: 0,
-      scoringPlay: false, isPenalty: false },
-    { id: 'c4', sequenceNumber: '400', type: { text: 'Penalty' },
-      text: 'PENALTY on LV-Y, False Start, 5 yards.', awayScore: 0, homeScore: 0,
-      scoringPlay: false, isPenalty: true,
-      penalty: { yards: 5, type: { text: 'False Start' } } }
+      penalty: { yards: 10, type: { text: 'Offensive Holding' } } }
   ];
-  const later = NFLMap.boothEventContext(NFLMap.boothEvent(plays[3]), plays, 3);
-  assert.strictEqual(later.atRisk, false); // those 7 points are already gone
-  assert.strictEqual(later.removesPoints, false);
+  const event = NFLMap.boothEventContext(NFLMap.boothEvent(plays[1]), plays, 1);
+  assert.strictEqual(event.removesPoints, true);
+  assert.strictEqual(event.pointsRemoved, 3);
+  assert.strictEqual(event.nullified, true);
 });
 
-ok('boothPointsAtRisk: null-safety and exported window constant', function () {
-  assert.strictEqual(NFLMap.BOOTH_AT_RISK_LOOKBACK, 6);
-  assert.deepStrictEqual(NFLMap.boothPointsAtRisk(null, null, 0, null), {
-    atRisk: false, points: 0, team: '', scoringPlay: null
-  });
-  assert.deepStrictEqual(
-    NFLMap.boothPointsAtRisk({ result: 'pending' }, [], 0, { removesPoints: false, during: { away: 0, home: 0 } }),
-    { atRisk: false, points: 0, team: '', scoringPlay: null });
+ok('points-at-risk is fully removed from the mapping surface', function () {
+  assert.strictEqual(NFLMap.boothPointsAtRisk, undefined);
+  assert.strictEqual(NFLMap.BOOTH_AT_RISK_LOOKBACK, undefined);
+  assert.strictEqual(NFLMap.BOOTH_SAFE_RESULTS, undefined);
+  const plays = [
+    { id: 'z1', sequenceNumber: '100', type: { text: 'Rush' },
+      text: 'D.Carter 3 yard run, TOUCHDOWN.', awayScore: 7, homeScore: 0,
+      scoringPlay: true, isPenalty: false },
+    { id: 'z2', sequenceNumber: '200', type: { text: 'Pass Reception' },
+      text: 'Play under review.', awayScore: 7, homeScore: 0,
+      scoringPlay: false, isPenalty: false }
+  ];
+  const event = NFLMap.boothEventContext(NFLMap.boothEvent(plays[1]), plays, 1);
+  assert.strictEqual(event.atRisk, undefined);
+  assert.strictEqual(event.pointsAtRisk, undefined);
+  assert.strictEqual(event.atRiskTeam, undefined);
 });
-
 // 8b. Red zone location (verified against real play fields) ----------------
 ok('isRedZonePlay: primary signal is start.yardsToEndzone (distance to driven end zone)', function () {
   // Real play shapes from event 401873286: "1st & 10 at HOU 19" (LV offense)
@@ -734,20 +720,44 @@ ok('isRedZonePlay: never guesses when no field establishes the distance', functi
   assert.strictEqual(NFLMap.yardsToEndzone(null), null);
 });
 
-ok('boothEvent: carries verified red zone membership; fixture has exactly one red zone event', function () {
+ok('boothEvent: carries verified red zone membership; fixture has two red zone events', function () {
   const events = NFLMap.boothEvents(sample.summary.drives);
   const rz = events.filter(function (e) { return e.redZone; });
-  assert.strictEqual(rz.length, 1);
+  assert.strictEqual(rz.length, 2);
   assert.strictEqual(rz[0].id, '4018732869007');
   assert.strictEqual(rz[0].kind, 'penalty');
   assert.strictEqual(rz[0].yardsToEndzone, 19);
   assert.strictEqual(rz[0].downDistance, '1st & 10 at HOU 19');
+  // An ordinary red-zone false start: in the red zone, but it wiped no score.
+  assert.strictEqual(rz[0].nullified, false);
+
+  // The fixture's nullified red-zone touchdown, in ESPN's published wording.
+  assert.strictEqual(rz[1].id, '4018732869008');
+  assert.strictEqual(rz[1].kind, 'penalty');
+  assert.strictEqual(rz[1].yardsToEndzone, 14);
+  assert.strictEqual(rz[1].downDistance, '1st & 15 at HOU 14');
+  assert.strictEqual(rz[1].nullified, true);
 
   // The other five fixture events sit outside the red zone.
   const others = events.filter(function (e) { return !e.redZone; });
   assert.strictEqual(others.length, 5);
   assert.deepStrictEqual(others.map(function (e) { return e.yardsToEndzone; }),
     [75, 80, 34, 34, 40]);
+  assert.deepStrictEqual(others.map(function (e) { return e.nullified; }),
+    [false, false, false, false, false]);
+});
+
+ok('the Red Zone tab keeps a nullified touchdown and drops plain red-zone flags', function () {
+  // This is the regression the tab exists for: a red-zone touchdown wiped by
+  // an accepted foul must survive the nullified-only filter, while the
+  // red-zone false start next to it must not.
+  const events = NFLMap.boothEvents(sample.summary.drives);
+  const shown = events.filter(function (e) {
+    return e.redZone && NFLMap.boothEventNullifies(e);
+  });
+  assert.strictEqual(shown.length, 1);
+  assert.strictEqual(shown[0].id, '4018732869008');
+  assert.ok(shown[0].text.indexOf('TOUCHDOWN NULLIFIED by Penalty') !== -1);
 });
 
 ok('boothEvents: a live last play without position data is not marked red zone', function () {
@@ -771,8 +781,12 @@ ok('dayBoothFeed: red zone membership survives the merge', function () {
     { id: '401873286', shortName: 'LV @ HOU', events: eventsA }
   ]);
   const rz = feed.filter(function (e) { return e.redZone; });
-  assert.strictEqual(rz.length, 1);
-  assert.strictEqual(rz[0].id, '4018732869007');
+  assert.strictEqual(rz.length, 2);
+  assert.deepStrictEqual(rz.map(function (e) { return e.id; }),
+    ['4018732869007', '4018732869008']);
+  // And so does the nullified verdict the all-games Red zone chip counts.
+  const shown = rz.filter(function (e) { return NFLMap.boothEventNullifies(e); });
+  assert.deepStrictEqual(shown.map(function (e) { return e.id; }), ['4018732869008']);
 });
 
 // 9. Day-wide booth feed (all games of a day, chat-style merge) ----------
@@ -864,82 +878,140 @@ ok('reconcileDayBoothFeed: null-safety', function () {
 });
 
 
+// 9. isScoringPlay, seen through the nearest-score lookup -------------------
+// boothEventContext captions a removal with nearestScoringPlay(), so these
+// cases pin down which plays count as scores. (The old "points at risk"
+// readings of the same fixtures are gone — nothing is at risk any more, only
+// nullified.)
+
 ok('isScoringPlay: extra point good is scoring, no good is not', function () {
+  // A clean PAT is not a booth event at all — no flag, no review.
   const good = { text: 'K.Matsuzawa extra point is GOOD.', type: { text: 'Extra Point' }, scoringPlay: false, isPenalty: false };
-  const noGood = { text: 'K.Matsuzawa extra point is NO GOOD.', type: { text: 'Extra Point' }, scoringPlay: false, isPenalty: false };
-  const blocked = { text: 'K.Matsuzawa extra point is BLOCKED.', type: { text: 'Extra Point' }, scoringPlay: false, isPenalty: false };
-  // scoringPlay true is authoritative even for PAT
-  const flaggedGood = { text: 'K.Matsuzawa extra point is GOOD.', type: { text: 'Extra Point' }, scoringPlay: true, isPenalty: false };
   assert.strictEqual(NFLMap.boothEvents({ previous: [{ id: 'd', team: { abbreviation: 'LV' }, plays: [good] }] }).length, 0, 'PAT good is not a booth event');
-  // Direct isScoringPlay check via boothPointsAtRisk path: a PAT good followed by a flag should be at risk (1pt)
-  // Need TD before PAT so points calculation is 1, not 7.
+
+  // TD then PAT then a flag: the nearest score is the 1-point PAT, not the TD.
   const plays = [
     { id: 'td1', sequenceNumber: '50', type: { text: 'Rush' }, text: 'K.Cole 4 yard TD run.', awayScore: 6, homeScore: 0, scoringPlay: true, isPenalty: false },
     { id: 'pat1', sequenceNumber: '100', type: { text: 'Extra Point' }, text: 'K.Matsuzawa extra point is GOOD.', awayScore: 7, homeScore: 0, scoringPlay: true, isPenalty: false },
     { id: 'flag1', sequenceNumber: '200', type: { text: 'Penalty' }, text: 'PENALTY on LV-X, Holding, 10 yards.', awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: true, penalty: { yards: 10, type: { text: 'Holding' } } }
   ];
   const ev = NFLMap.boothEventContext(NFLMap.boothEvent(plays[2]), plays, 2);
-  assert.strictEqual(ev.atRisk, true);
-  assert.strictEqual(ev.pointsAtRisk, 1);
+  assert.strictEqual(ev.relatedScoringPlay.id, 'pat1');
+  assert.strictEqual(ev.relatedScoringPlay.points, 1);
+  // The points are still on the board, so this flag is not a nullification.
+  assert.strictEqual(ev.removesPoints, false);
+  assert.strictEqual(ev.nullified, false);
+
+  // A PAT that missed is not a score, so a later flag finds nothing.
+  const noGood = [
+    { id: 'pat2', sequenceNumber: '100', type: { text: 'Extra Point' }, text: 'K.Matsuzawa extra point is NO GOOD.', awayScore: 6, homeScore: 0, scoringPlay: false, isPenalty: false },
+    { id: 'flag2', sequenceNumber: '200', type: { text: 'Penalty' }, text: 'PENALTY on LV-X, Holding, 10 yards.', awayScore: 6, homeScore: 0, scoringPlay: false, isPenalty: true, penalty: { yards: 10, type: { text: 'Holding' } } }
+  ];
+  const evNoGood = NFLMap.boothEventContext(NFLMap.boothEvent(noGood[1]), noGood, 1);
+  assert.strictEqual(evNoGood.relatedScoringPlay, null);
+  assert.strictEqual(evNoGood.nullified, false);
 });
 
 ok('isScoringPlay: field goal no good / blocked is NOT scoring', function () {
-  const good = { id: 'fg1', sequenceNumber: '100', type: { text: 'Field Goal' }, text: 'K.Matsuzawa 43 yard field goal is GOOD.', awayScore: 3, homeScore: 0, scoringPlay: true, isPenalty: false };
-  const noGood = { id: 'fg2', sequenceNumber: '200', type: { text: 'Field Goal' }, text: 'K.Matsuzawa 43 yard field goal is NO GOOD.', awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false };
-  const blocked = { id: 'fg3', sequenceNumber: '300', type: { text: 'Field Goal' }, text: 'K.Matsuzawa 43 yard field goal is BLOCKED.', awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false };
-  // Good FG should be found as scoring play for a subsequent flag
+  // Good FG is found as the nearest score for a subsequent flag.
   const playsGood = [
-    good,
+    { id: 'fg1', sequenceNumber: '100', type: { text: 'Field Goal' }, text: 'K.Matsuzawa 43 yard field goal is GOOD.', awayScore: 3, homeScore: 0, scoringPlay: true, isPenalty: false },
     { id: 'flag', sequenceNumber: '200', type: { text: 'Penalty' }, text: 'PENALTY on LV-X, Holding, 10 yards.', awayScore: 3, homeScore: 0, scoringPlay: false, isPenalty: true, penalty: { yards: 10, type: { text: 'Holding' } } }
   ];
   const evGood = NFLMap.boothEventContext(NFLMap.boothEvent(playsGood[1]), playsGood, 1);
-  assert.strictEqual(evGood.atRisk, true);
-  assert.strictEqual(evGood.pointsAtRisk, 3);
+  assert.strictEqual(evGood.relatedScoringPlay.id, 'fg1');
+  assert.strictEqual(evGood.relatedScoringPlay.points, 3);
+  assert.strictEqual(evGood.nullified, false, 'the 3 points are still on the board');
 
-  // No good FG should NOT be considered scoring, so a flag after it is not at risk
+  // A missed FG is not scoring, so there is nothing behind the flag.
   const playsBad = [
-    noGood,
+    { id: 'fg2', sequenceNumber: '200', type: { text: 'Field Goal' }, text: 'K.Matsuzawa 43 yard field goal is NO GOOD.', awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false },
     { id: 'flag2', sequenceNumber: '400', type: { text: 'Penalty' }, text: 'PENALTY on LV-X, Holding, 10 yards.', awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: true, penalty: { yards: 10, type: { text: 'Holding' } } }
   ];
   const evBad = NFLMap.boothEventContext(NFLMap.boothEvent(playsBad[1]), playsBad, 1);
-  assert.strictEqual(evBad.atRisk, false);
+  assert.strictEqual(evBad.relatedScoringPlay, null);
+  assert.strictEqual(evBad.nullified, false);
+
+  // Nor is a blocked FG.
+  const playsBlocked = [
+    { id: 'fg3', sequenceNumber: '300', type: { text: 'Field Goal' }, text: 'K.Matsuzawa 43 yard field goal is BLOCKED.', awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false },
+    { id: 'flag3', sequenceNumber: '400', type: { text: 'Penalty' }, text: 'PENALTY on LV-X, Holding, 10 yards.', awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: true, penalty: { yards: 10, type: { text: 'Holding' } } }
+  ];
+  const evBlocked = NFLMap.boothEventContext(NFLMap.boothEvent(playsBlocked[1]), playsBlocked, 1);
+  assert.strictEqual(evBlocked.relatedScoringPlay, null);
+  assert.strictEqual(evBlocked.nullified, false);
 });
 
 ok('isScoringPlay: two-point conversion good is scoring, failed is not', function () {
-  const good2pt = { id: '2pt1', sequenceNumber: '100', type: { text: 'Two-Point Conversion' }, text: 'D.Carter rush for a two-point conversion is GOOD.', awayScore: 8, homeScore: 0, scoringPlay: true, isPenalty: false };
-  const failed2pt = { id: '2pt2', sequenceNumber: '200', type: { text: 'Two-Point Conversion' }, text: 'Two-point pass incomplete.', awayScore: 6, homeScore: 0, scoringPlay: false, isPenalty: false };
-  // Need TD 6pts before 2pt so points calc is 2, not 8
+  // TD 6 then a successful 2-pointer: the nearest score is worth 2, not 8.
   const playsGood = [
     { id: 'td', sequenceNumber: '50', type: { text: 'Rush' }, text: 'K.Cole 4 yard TD run.', awayScore: 6, homeScore: 0, scoringPlay: true, isPenalty: false },
-    good2pt,
+    { id: '2pt1', sequenceNumber: '100', type: { text: 'Two-Point Conversion' }, text: 'D.Carter rush for a two-point conversion is GOOD.', awayScore: 8, homeScore: 0, scoringPlay: true, isPenalty: false },
     { id: 'flag', sequenceNumber: '200', type: { text: 'Penalty' }, text: 'PENALTY on LV-X, Holding, 10 yards.', awayScore: 8, homeScore: 0, scoringPlay: false, isPenalty: true, penalty: { yards: 10, type: { text: 'Holding' } } }
   ];
   const evGood = NFLMap.boothEventContext(NFLMap.boothEvent(playsGood[2]), playsGood, 2);
-  assert.strictEqual(evGood.atRisk, true);
-  assert.strictEqual(evGood.pointsAtRisk, 2);
+  assert.strictEqual(evGood.relatedScoringPlay.id, '2pt1');
+  assert.strictEqual(evGood.relatedScoringPlay.points, 2);
+  assert.strictEqual(evGood.nullified, false);
+
+  // A failed try is skipped; the lookup falls back to the touchdown.
+  const playsFailed = [
+    { id: 'td', sequenceNumber: '50', type: { text: 'Rush' }, text: 'K.Cole 4 yard TD run.', awayScore: 6, homeScore: 0, scoringPlay: true, isPenalty: false },
+    { id: '2pt2', sequenceNumber: '200', type: { text: 'Two-Point Conversion' }, text: 'Two-point pass incomplete.', awayScore: 6, homeScore: 0, scoringPlay: false, isPenalty: false },
+    { id: 'flag', sequenceNumber: '300', type: { text: 'Penalty' }, text: 'PENALTY on LV-X, Holding, 10 yards.', awayScore: 6, homeScore: 0, scoringPlay: false, isPenalty: true, penalty: { yards: 10, type: { text: 'Holding' } } }
+  ];
+  const evFailed = NFLMap.boothEventContext(NFLMap.boothEvent(playsFailed[2]), playsFailed, 2);
+  assert.strictEqual(evFailed.relatedScoringPlay.id, 'td');
+  assert.strictEqual(evFailed.relatedScoringPlay.points, 6);
+  assert.strictEqual(evFailed.nullified, false);
 });
 
-ok('boothPointsAtRisk: TD under review in a single entry (current play is scoring)', function () {
+ok('a nullified 2-point try and a nullified PAT are both caught by text', function () {
+  const plays = [
+    { id: 'td', sequenceNumber: '50', type: { text: 'Rush' }, text: 'K.Cole 4 yard TD run.', awayScore: 6, homeScore: 0, scoringPlay: true, isPenalty: false },
+    { id: 'pat', sequenceNumber: '100', type: { text: 'Extra Point' },
+      text: 'H.Butker extra point is GOOD, EXTRA POINT NULLIFIED by Penalty.PENALTY on ' +
+        'KC-C.Humphrey, Offensive Holding, 10 yards, enforced at PHI 15 - No Play.',
+      awayScore: 6, homeScore: 0, scoringPlay: false, isPenalty: true,
+      penalty: { yards: 10, type: { text: 'Offensive Holding' } } }
+  ];
+  const ev = NFLMap.boothEventContext(NFLMap.boothEvent(plays[1]), plays, 1);
+  assert.strictEqual(ev.nullified, true);
+  // ESPN never published the point, so no score drop is required for this.
+  assert.strictEqual(ev.removesPoints, false);
+});
+
+ok('a TD and its review published as one play: nothing is nullified until the verdict', function () {
   // ESPN sometimes publishes "TOUCHDOWN. Play under review." as one play.
-  // That play is both scoringPlay true and review. It should be at risk
-  // on itself.
+  // The old feed flagged 7 "points at risk" here; that feature is gone. The
+  // points are still on the board, so the feeds stay quiet.
   const plays = [
     { id: 'prev', sequenceNumber: '100', type: { text: 'Rush' }, text: 'W.Marks for 2 yards.', awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false },
     { id: 'tdrev', sequenceNumber: '200', type: { text: 'Rush' }, text: 'D.Carter 3 yard run, TOUCHDOWN. Play under review.', awayScore: 7, homeScore: 0, scoringPlay: true, isPenalty: false }
   ];
-  // The TD review entry is classified as review, but its scoringPlay flag is true,
-  // so scoringPlayFromCurrent should find it.
   const ev = NFLMap.boothEvent(plays[1]);
   assert.strictEqual(ev.kind, 'review');
+  assert.strictEqual(ev.nullified, false);
   const withCtx = NFLMap.boothEventContext(ev, plays, 1);
-  assert.strictEqual(withCtx.atRisk, true);
-  assert.strictEqual(withCtx.pointsAtRisk, 7);
-  assert.strictEqual(withCtx.relatedScoringPlay.id, 'tdrev');
+  assert.strictEqual(withCtx.nullified, false);
+  assert.strictEqual(withCtx.removesPoints, false);
+
+  // Same entry, but the verdict wiped the score: the running score drops and
+  // the entry is reported.
+  const wiped = plays.concat([
+    { id: 'verdict', sequenceNumber: '300', type: { text: 'Replay Review' },
+      text: 'The Replay Official reviewed the runner broke the plane ruling, and the play was REVERSED.',
+      awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false }
+  ]);
+  const resolved = NFLMap.boothEventContext(NFLMap.boothEvent(wiped[1]), wiped, 1);
+  assert.strictEqual(resolved.removesPoints, true);
+  assert.strictEqual(resolved.pointsRemoved, 7);
+  assert.strictEqual(resolved.nullified, true);
 });
 
-ok('boothPointsAtRisk: expanded window 6 catches delayed reviews after PAT and timeout', function () {
-  // Sequence: TD, PAT good, timeout, procedural play, review – still before kickoff,
-  // distance 4 after TD (within 6 but would have been outside old 3).
+ok('a delayed review after a PAT and a timeout only reports once points come off', function () {
+  // Sequence: TD, PAT good, timeout, procedural play, review — the review is
+  // 4 plays after the touchdown. Nothing has been taken off the board yet.
   const plays = [
     { id: 'td', sequenceNumber: '100', type: { text: 'Rush' }, text: 'K.Cole 4 yard TD run.', awayScore: 6, homeScore: 0, scoringPlay: true, isPenalty: false },
     { id: 'pat', sequenceNumber: '200', type: { text: 'Extra Point' }, text: 'K.Matsuzawa extra point is GOOD.', awayScore: 7, homeScore: 0, scoringPlay: true, isPenalty: false },
@@ -947,9 +1019,20 @@ ok('boothPointsAtRisk: expanded window 6 catches delayed reviews after PAT and t
     { id: 'proc', sequenceNumber: '400', type: { text: 'Rush' }, text: 'W.Marks for 0 yards.', awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: false },
     { id: 'rev', sequenceNumber: '500', type: { text: 'Replay Review' }, text: 'Play under review.', awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: false }
   ];
-  const ev = NFLMap.boothEventContext(NFLMap.boothEvent(plays[4]), plays, 4);
-  assert.strictEqual(ev.atRisk, true, 'delayed review 4 plays after TD should be at risk with window 6');
-  assert.strictEqual(ev.pointsAtRisk, 6, 'should still reference the original TD (6pts) not the PAT');
+  const quiet = NFLMap.boothEventContext(NFLMap.boothEvent(plays[4]), plays, 4);
+  assert.strictEqual(quiet.nullified, false, 'a pending review removes nothing');
+  assert.strictEqual(quiet.removesPoints, false);
+
+  // The verdict arrives and the score falls 7 -> 0: now it is a nullification.
+  const settled = plays.concat([
+    { id: 'out', sequenceNumber: '600', type: { text: 'Replay Review' },
+      text: 'The replay official reviewed the ruling, and the play was REVERSED.',
+      awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false }
+  ]);
+  const ev = NFLMap.boothEventContext(NFLMap.boothEvent(settled[4]), settled, 4);
+  assert.strictEqual(ev.removesPoints, true);
+  assert.strictEqual(ev.pointsRemoved, 7);
+  assert.strictEqual(ev.nullified, true);
 });
 
 

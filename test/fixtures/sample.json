@@ -4,7 +4,9 @@
     "name": "Las Vegas Raiders at Houston Texans",
     "shortName": "LV @ HOU",
     "date": "2026-08-21T00:00Z",
-    "week": { "number": 3 },
+    "week": {
+      "number": 3
+    },
     "competitions": [
       {
         "id": "401873286",
@@ -14,7 +16,11 @@
         "venue": {
           "id": "3891",
           "fullName": "Reliant Stadium",
-          "address": { "city": "Houston", "state": "TX", "country": "USA" },
+          "address": {
+            "city": "Houston",
+            "state": "TX",
+            "country": "USA"
+          },
           "indoor": true
         },
         "competitors": [
@@ -35,13 +41,33 @@
             },
             "score": "20",
             "linescores": [
-              { "value": 17.0, "displayValue": "17", "period": 1 },
-              { "value": 3.0, "displayValue": "3", "period": 2 },
-              { "value": 0.0, "displayValue": "0", "period": 3 },
-              { "value": 0.0, "displayValue": "0", "period": 4 }
+              {
+                "value": 17.0,
+                "displayValue": "17",
+                "period": 1
+              },
+              {
+                "value": 3.0,
+                "displayValue": "3",
+                "period": 2
+              },
+              {
+                "value": 0.0,
+                "displayValue": "0",
+                "period": 3
+              },
+              {
+                "value": 0.0,
+                "displayValue": "0",
+                "period": 4
+              }
             ],
             "records": [
-              { "name": "overall", "type": "total", "summary": "0-2" }
+              {
+                "name": "overall",
+                "type": "total",
+                "summary": "0-2"
+              }
             ]
           },
           {
@@ -61,13 +87,33 @@
             },
             "score": "22",
             "linescores": [
-              { "value": 0.0, "displayValue": "0", "period": 1 },
-              { "value": 3.0, "displayValue": "3", "period": 2 },
-              { "value": 7.0, "displayValue": "7", "period": 3 },
-              { "value": 12.0, "displayValue": "12", "period": 4 }
+              {
+                "value": 0.0,
+                "displayValue": "0",
+                "period": 1
+              },
+              {
+                "value": 3.0,
+                "displayValue": "3",
+                "period": 2
+              },
+              {
+                "value": 7.0,
+                "displayValue": "7",
+                "period": 3
+              },
+              {
+                "value": 12.0,
+                "displayValue": "12",
+                "period": 4
+              }
             ],
             "records": [
-              { "name": "overall", "type": "total", "summary": "1-1" }
+              {
+                "name": "overall",
+                "type": "total",
+                "summary": "1-1"
+              }
             ]
           }
         ],
@@ -86,7 +132,12 @@
           }
         },
         "broadcasts": [
-          { "market": "national", "names": ["ESPN"] }
+          {
+            "market": "national",
+            "names": [
+              "ESPN"
+            ]
+          }
         ]
       }
     ]
@@ -105,19 +156,71 @@
           },
           "homeAway": "away",
           "statistics": [
-            { "name": "firstDowns", "displayValue": "22", "label": "1st Downs" },
-            { "name": "thirdDownEff", "displayValue": "4-12", "label": "3rd down efficiency" },
-            { "name": "totalOffensivePlays", "displayValue": "68", "label": "Total Plays" },
-            { "name": "totalYards", "displayValue": "400", "label": "Total Yards" },
-            { "name": "netPassingYards", "displayValue": "241", "label": "Passing" },
-            { "name": "completionAttempts", "displayValue": "23/39", "label": "Comp/Att" },
-            { "name": "sacksYardsLost", "displayValue": "1-11", "label": "Sacks-Yards Lost" },
-            { "name": "rushingYards", "displayValue": "159", "label": "Rushing" },
-            { "name": "rushingAttempts", "displayValue": "28", "label": "Rushing Attempts" },
-            { "name": "redZoneAttempts", "displayValue": "3-3", "label": "Red Zone (Made-Att)" },
-            { "name": "totalPenaltiesYards", "displayValue": "9-83", "label": "Penalties" },
-            { "name": "turnovers", "displayValue": "1", "label": "Turnovers" },
-            { "name": "possessionTime", "displayValue": "30:35", "label": "Possession" }
+            {
+              "name": "firstDowns",
+              "displayValue": "22",
+              "label": "1st Downs"
+            },
+            {
+              "name": "thirdDownEff",
+              "displayValue": "4-12",
+              "label": "3rd down efficiency"
+            },
+            {
+              "name": "totalOffensivePlays",
+              "displayValue": "68",
+              "label": "Total Plays"
+            },
+            {
+              "name": "totalYards",
+              "displayValue": "400",
+              "label": "Total Yards"
+            },
+            {
+              "name": "netPassingYards",
+              "displayValue": "241",
+              "label": "Passing"
+            },
+            {
+              "name": "completionAttempts",
+              "displayValue": "23/39",
+              "label": "Comp/Att"
+            },
+            {
+              "name": "sacksYardsLost",
+              "displayValue": "1-11",
+              "label": "Sacks-Yards Lost"
+            },
+            {
+              "name": "rushingYards",
+              "displayValue": "159",
+              "label": "Rushing"
+            },
+            {
+              "name": "rushingAttempts",
+              "displayValue": "28",
+              "label": "Rushing Attempts"
+            },
+            {
+              "name": "redZoneAttempts",
+              "displayValue": "3-3",
+              "label": "Red Zone (Made-Att)"
+            },
+            {
+              "name": "totalPenaltiesYards",
+              "displayValue": "9-83",
+              "label": "Penalties"
+            },
+            {
+              "name": "turnovers",
+              "displayValue": "1",
+              "label": "Turnovers"
+            },
+            {
+              "name": "possessionTime",
+              "displayValue": "30:35",
+              "label": "Possession"
+            }
           ]
         },
         {
@@ -131,19 +234,71 @@
           },
           "homeAway": "home",
           "statistics": [
-            { "name": "firstDowns", "displayValue": "13", "label": "1st Downs" },
-            { "name": "thirdDownEff", "displayValue": "7-17", "label": "3rd down efficiency" },
-            { "name": "totalOffensivePlays", "displayValue": "59", "label": "Total Plays" },
-            { "name": "totalYards", "displayValue": "219", "label": "Total Yards" },
-            { "name": "netPassingYards", "displayValue": "141", "label": "Passing" },
-            { "name": "completionAttempts", "displayValue": "21/31", "label": "Comp/Att" },
-            { "name": "sacksYardsLost", "displayValue": "3-23", "label": "Sacks-Yards Lost" },
-            { "name": "rushingYards", "displayValue": "78", "label": "Rushing" },
-            { "name": "rushingAttempts", "displayValue": "25", "label": "Rushing Attempts" },
-            { "name": "redZoneAttempts", "displayValue": "0-0", "label": "Red Zone (Made-Att)" },
-            { "name": "totalPenaltiesYards", "displayValue": "4-25", "label": "Penalties" },
-            { "name": "turnovers", "displayValue": "2", "label": "Turnovers" },
-            { "name": "possessionTime", "displayValue": "29:25", "label": "Possession" }
+            {
+              "name": "firstDowns",
+              "displayValue": "13",
+              "label": "1st Downs"
+            },
+            {
+              "name": "thirdDownEff",
+              "displayValue": "7-17",
+              "label": "3rd down efficiency"
+            },
+            {
+              "name": "totalOffensivePlays",
+              "displayValue": "59",
+              "label": "Total Plays"
+            },
+            {
+              "name": "totalYards",
+              "displayValue": "219",
+              "label": "Total Yards"
+            },
+            {
+              "name": "netPassingYards",
+              "displayValue": "141",
+              "label": "Passing"
+            },
+            {
+              "name": "completionAttempts",
+              "displayValue": "21/31",
+              "label": "Comp/Att"
+            },
+            {
+              "name": "sacksYardsLost",
+              "displayValue": "3-23",
+              "label": "Sacks-Yards Lost"
+            },
+            {
+              "name": "rushingYards",
+              "displayValue": "78",
+              "label": "Rushing"
+            },
+            {
+              "name": "rushingAttempts",
+              "displayValue": "25",
+              "label": "Rushing Attempts"
+            },
+            {
+              "name": "redZoneAttempts",
+              "displayValue": "0-0",
+              "label": "Red Zone (Made-Att)"
+            },
+            {
+              "name": "totalPenaltiesYards",
+              "displayValue": "4-25",
+              "label": "Penalties"
+            },
+            {
+              "name": "turnovers",
+              "displayValue": "2",
+              "label": "Turnovers"
+            },
+            {
+              "name": "possessionTime",
+              "displayValue": "29:25",
+              "label": "Possession"
+            }
           ]
         }
       ],
@@ -160,53 +315,117 @@
           "statistics": [
             {
               "name": "passing",
-              "labels": ["C/ATT", "YDS", "AVG", "TD", "INT", "SACKS", "RTG"],
+              "labels": [
+                "C/ATT",
+                "YDS",
+                "AVG",
+                "TD",
+                "INT",
+                "SACKS",
+                "RTG"
+              ],
               "athletes": [
                 {
                   "athlete": {
                     "id": "4260394",
                     "displayName": "Aidan O'Connell",
                     "jersey": "12",
-                    "headshot": { "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4260394.png" }
+                    "headshot": {
+                      "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4260394.png"
+                    }
                   },
-                  "stats": ["15/24", "166", "6.9", "0", "0", "0-0", "83.0"]
+                  "stats": [
+                    "15/24",
+                    "166",
+                    "6.9",
+                    "0",
+                    "0",
+                    "0-0",
+                    "83.0"
+                  ]
                 },
                 {
                   "athlete": {
                     "id": "4837248",
                     "displayName": "Fernando Mendoza",
                     "jersey": "15",
-                    "headshot": { "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4837248.png" }
+                    "headshot": {
+                      "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4837248.png"
+                    }
                   },
-                  "stats": ["8/15", "86", "5.7", "0", "1", "1-11", "42.6"]
+                  "stats": [
+                    "8/15",
+                    "86",
+                    "5.7",
+                    "0",
+                    "1",
+                    "1-11",
+                    "42.6"
+                  ]
                 }
               ],
-              "totals": ["23/39", "241", "6.5", "0", "1", "1-11", "67.5"]
+              "totals": [
+                "23/39",
+                "241",
+                "6.5",
+                "0",
+                "1",
+                "1-11",
+                "67.5"
+              ]
             },
             {
               "name": "rushing",
-              "labels": ["CAR", "YDS", "AVG", "TD", "LONG"],
+              "labels": [
+                "CAR",
+                "YDS",
+                "AVG",
+                "TD",
+                "LONG"
+              ],
               "athletes": [
                 {
                   "athlete": {
                     "id": "4686658",
                     "displayName": "Mike Washington Jr.",
                     "jersey": "30",
-                    "headshot": { "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4686658.png" }
+                    "headshot": {
+                      "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4686658.png"
+                    }
                   },
-                  "stats": ["9", "56", "6.2", "0", "33"]
+                  "stats": [
+                    "9",
+                    "56",
+                    "6.2",
+                    "0",
+                    "33"
+                  ]
                 },
                 {
                   "athlete": {
                     "id": "4366963",
                     "displayName": "Dylan Laube",
                     "jersey": "23",
-                    "headshot": { "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4366963.png" }
+                    "headshot": {
+                      "href": "https://a.espncdn.com/i/headshots/nfl/players/full/4366963.png"
+                    }
                   },
-                  "stats": ["6", "37", "6.2", "0", "12"]
+                  "stats": [
+                    "6",
+                    "37",
+                    "6.2",
+                    "0",
+                    "12"
+                  ]
                 }
               ],
-              "totals": ["28", "159", "5.7", "0", "33"]
+              "totals": [
+                "28",
+                "159",
+                "5.7",
+                "0",
+                "33"
+              ]
             }
           ]
         }
@@ -222,11 +441,37 @@
             "name": "Texans",
             "abbreviation": "HOU",
             "displayName": "Houston Texans",
-            "logos": [{ "href": "https://a.espncdn.com/i/teamlogos/nfl/500/hou.png" }]
+            "logos": [
+              {
+                "href": "https://a.espncdn.com/i/teamlogos/nfl/500/hou.png"
+              }
+            ]
           },
-          "start": { "period": { "type": "quarter", "number": 1 }, "clock": { "displayValue": "15:00" }, "yardLine": 35, "text": "HOU 35" },
-          "end": { "period": { "type": "quarter", "number": 1 }, "clock": { "displayValue": "10:06" }, "yardLine": 0, "text": "End Zone" },
-          "timeElapsed": { "displayValue": "4:54" },
+          "start": {
+            "period": {
+              "type": "quarter",
+              "number": 1
+            },
+            "clock": {
+              "displayValue": "15:00"
+            },
+            "yardLine": 35,
+            "text": "HOU 35"
+          },
+          "end": {
+            "period": {
+              "type": "quarter",
+              "number": 1
+            },
+            "clock": {
+              "displayValue": "10:06"
+            },
+            "yardLine": 0,
+            "text": "End Zone"
+          },
+          "timeElapsed": {
+            "displayValue": "4:54"
+          },
           "yards": 64,
           "isScore": true,
           "offensivePlays": 13,
@@ -237,32 +482,71 @@
             {
               "id": "40187328639",
               "sequenceNumber": "3900",
-              "type": { "id": "53", "text": "Kickoff", "abbreviation": "K" },
+              "type": {
+                "id": "53",
+                "text": "Kickoff",
+                "abbreviation": "K"
+              },
               "text": "M.Gay kicks 55 yards from LV 35 to HST 10. N.Whittington to HST 31 for 21 yards (D.Ogunbowale; P.Gurd).",
               "awayScore": 0,
               "homeScore": 0,
-              "period": { "number": 1 },
-              "clock": { "displayValue": "15:00" },
+              "period": {
+                "number": 1
+              },
+              "clock": {
+                "displayValue": "15:00"
+              },
               "scoringPlay": false,
               "statYardage": 21,
-              "start": { "down": 0, "distance": 0, "yardLine": 65, "possessionText": "LV 35" },
-              "end": { "down": 1, "distance": 10, "yardLine": 31, "downDistanceText": "1st & 10 at HOU 31", "possessionText": "HOU 31" },
+              "start": {
+                "down": 0,
+                "distance": 0,
+                "yardLine": 65,
+                "possessionText": "LV 35"
+              },
+              "end": {
+                "down": 1,
+                "distance": 10,
+                "yardLine": 31,
+                "downDistanceText": "1st & 10 at HOU 31",
+                "possessionText": "HOU 31"
+              },
               "isPenalty": false,
               "isTurnover": false
             },
             {
               "id": "40187328662",
               "sequenceNumber": "6200",
-              "type": { "id": "5", "text": "Rush", "abbreviation": "RUSH" },
+              "type": {
+                "id": "5",
+                "text": "Rush",
+                "abbreviation": "RUSH"
+              },
               "text": "W.Marks right guard to HST 40 for 9 yards (C.Lindenberg; T.McCollum).",
               "awayScore": 0,
               "homeScore": 0,
-              "period": { "number": 1 },
-              "clock": { "displayValue": "14:54" },
+              "period": {
+                "number": 1
+              },
+              "clock": {
+                "displayValue": "14:54"
+              },
               "scoringPlay": false,
               "statYardage": 9,
-              "start": { "down": 1, "distance": 10, "yardLine": 31, "downDistanceText": "1st & 10 at HOU 31", "possessionText": "HOU 31" },
-              "end": { "down": 2, "distance": 1, "yardLine": 40, "downDistanceText": "2nd & 1 at HOU 40", "possessionText": "HOU 40" },
+              "start": {
+                "down": 1,
+                "distance": 10,
+                "yardLine": 31,
+                "downDistanceText": "1st & 10 at HOU 31",
+                "possessionText": "HOU 31"
+              },
+              "end": {
+                "down": 2,
+                "distance": 1,
+                "yardLine": 40,
+                "downDistanceText": "2nd & 1 at HOU 40",
+                "possessionText": "HOU 40"
+              },
               "isPenalty": false,
               "isTurnover": false
             }
@@ -276,11 +560,37 @@
             "name": "Texans",
             "abbreviation": "HOU",
             "displayName": "Houston Texans",
-            "logos": [{ "href": "https://a.espncdn.com/i/teamlogos/nfl/500/hou.png" }]
+            "logos": [
+              {
+                "href": "https://a.espncdn.com/i/teamlogos/nfl/500/hou.png"
+              }
+            ]
           },
-          "start": { "period": { "type": "quarter", "number": 4 }, "clock": { "displayValue": "7:36" }, "yardLine": 26, "text": "HOU 26" },
-          "end": { "period": { "type": "quarter", "number": 4 }, "clock": { "displayValue": "5:43" }, "yardLine": 35, "text": "HOU 35" },
-          "timeElapsed": { "displayValue": "1:53" },
+          "start": {
+            "period": {
+              "type": "quarter",
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "7:36"
+            },
+            "yardLine": 26,
+            "text": "HOU 26"
+          },
+          "end": {
+            "period": {
+              "type": "quarter",
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "5:43"
+            },
+            "yardLine": 35,
+            "text": "HOU 35"
+          },
+          "timeElapsed": {
+            "displayValue": "1:53"
+          },
           "yards": 9,
           "isScore": false,
           "offensivePlays": 3,
@@ -291,32 +601,70 @@
             {
               "id": "4018732863526",
               "sequenceNumber": "352600",
-              "type": { "id": "53", "text": "Kickoff", "abbreviation": "K" },
+              "type": {
+                "id": "53",
+                "text": "Kickoff",
+                "abbreviation": "K"
+              },
               "text": "K.Matsuzawa kicks 61 yards from LV 35 to HST 4. T.Saunders to HST 26 for 22 yards (D.Perkins; Bu.Johnson).",
               "awayScore": 16,
               "homeScore": 20,
-              "period": { "number": 4 },
-              "clock": { "displayValue": "7:36" },
+              "period": {
+                "number": 4
+              },
+              "clock": {
+                "displayValue": "7:36"
+              },
               "scoringPlay": false,
               "statYardage": 22,
-              "start": { "down": 0, "distance": 0, "yardLine": 65, "possessionText": "LV 35" },
-              "end": { "down": 1, "distance": 10, "yardLine": 26, "downDistanceText": "1st & 10 at HOU 26", "possessionText": "HOU 26" },
+              "start": {
+                "down": 0,
+                "distance": 0,
+                "yardLine": 65,
+                "possessionText": "LV 35"
+              },
+              "end": {
+                "down": 1,
+                "distance": 10,
+                "yardLine": 26,
+                "downDistanceText": "1st & 10 at HOU 26",
+                "possessionText": "HOU 26"
+              },
               "isPenalty": false,
               "isTurnover": false
             },
             {
               "id": "4018732863556",
               "sequenceNumber": "355600",
-              "type": { "id": "3", "text": "Pass Incompletion" },
+              "type": {
+                "id": "3",
+                "text": "Pass Incompletion"
+              },
               "text": "(Shotgun) B.Rypien pass incomplete deep left to J.Kelly (D.Richardson).",
               "awayScore": 16,
               "homeScore": 20,
-              "period": { "number": 4 },
-              "clock": { "displayValue": "7:27" },
+              "period": {
+                "number": 4
+              },
+              "clock": {
+                "displayValue": "7:27"
+              },
               "scoringPlay": false,
               "statYardage": 0,
-              "start": { "down": 1, "distance": 10, "yardLine": 26, "downDistanceText": "1st & 10 at HOU 26", "possessionText": "HOU 26" },
-              "end": { "down": 2, "distance": 10, "yardLine": 26, "downDistanceText": "2nd & 10 at HOU 26", "possessionText": "HOU 26" },
+              "start": {
+                "down": 1,
+                "distance": 10,
+                "yardLine": 26,
+                "downDistanceText": "1st & 10 at HOU 26",
+                "possessionText": "HOU 26"
+              },
+              "end": {
+                "down": 2,
+                "distance": 10,
+                "yardLine": 26,
+                "downDistanceText": "2nd & 10 at HOU 26",
+                "possessionText": "HOU 26"
+              },
               "isPenalty": false,
               "isTurnover": false
             }
@@ -330,11 +678,37 @@
             "name": "Raiders",
             "abbreviation": "LV",
             "displayName": "Las Vegas Raiders",
-            "logos": [{ "href": "https://a.espncdn.com/i/teamlogos/nfl/500/lv.png" }]
+            "logos": [
+              {
+                "href": "https://a.espncdn.com/i/teamlogos/nfl/500/lv.png"
+              }
+            ]
           },
-          "start": { "period": { "type": "quarter", "number": 2 }, "clock": { "displayValue": "11:00" }, "yardLine": 25, "text": "LV 25" },
-          "end": { "period": { "type": "quarter", "number": 2 }, "clock": { "displayValue": "9:00" }, "yardLine": 25, "text": "LV 25" },
-          "timeElapsed": { "displayValue": "2:00" },
+          "start": {
+            "period": {
+              "type": "quarter",
+              "number": 2
+            },
+            "clock": {
+              "displayValue": "11:00"
+            },
+            "yardLine": 25,
+            "text": "LV 25"
+          },
+          "end": {
+            "period": {
+              "type": "quarter",
+              "number": 2
+            },
+            "clock": {
+              "displayValue": "9:00"
+            },
+            "yardLine": 25,
+            "text": "LV 25"
+          },
+          "timeElapsed": {
+            "displayValue": "2:00"
+          },
           "yards": 0,
           "isScore": false,
           "offensivePlays": 7,
@@ -345,116 +719,325 @@
             {
               "id": "4018732869001",
               "sequenceNumber": "8000",
-              "type": { "text": "Penalty" },
+              "type": {
+                "text": "Penalty"
+              },
               "text": "PENALTY on LV-K.Miller, False Start, 5 yards, enforced at LV 25 - No Play.",
               "awayScore": 0,
               "homeScore": 7,
-              "period": { "number": 2 },
-              "clock": { "displayValue": "10:44" },
+              "period": {
+                "number": 2
+              },
+              "clock": {
+                "displayValue": "10:44"
+              },
               "scoringPlay": false,
               "statYardage": -5,
-              "start": { "down": 1, "distance": 10, "yardLine": 25, "downDistanceText": "1st & 10 at LV 25", "possessionText": "LV 25" },
-              "end": { "down": 1, "distance": 15, "yardLine": 20, "downDistanceText": "1st & 15 at LV 20", "possessionText": "LV 20" },
+              "start": {
+                "down": 1,
+                "distance": 10,
+                "yardLine": 25,
+                "downDistanceText": "1st & 10 at LV 25",
+                "possessionText": "LV 25"
+              },
+              "end": {
+                "down": 1,
+                "distance": 15,
+                "yardLine": 20,
+                "downDistanceText": "1st & 15 at LV 20",
+                "possessionText": "LV 20"
+              },
               "isPenalty": true,
               "isTurnover": false,
-              "penalty": { "yards": 5, "type": { "text": "False Start" } }
+              "penalty": {
+                "yards": 5,
+                "type": {
+                  "text": "False Start"
+                }
+              }
             },
             {
               "id": "4018732869002",
               "sequenceNumber": "8100",
-              "type": { "text": "Penalty" },
+              "type": {
+                "text": "Penalty"
+              },
               "text": "PENALTY on HOU-D.Hunter, Defensive Offside, 5 yards, declined.",
               "awayScore": 0,
               "homeScore": 7,
-              "period": { "number": 2 },
-              "clock": { "displayValue": "10:20" },
+              "period": {
+                "number": 2
+              },
+              "clock": {
+                "displayValue": "10:20"
+              },
               "scoringPlay": false,
               "statYardage": 0,
-              "start": { "down": 1, "distance": 15, "yardLine": 20, "downDistanceText": "1st & 15 at LV 20", "possessionText": "LV 20" },
-              "end": { "down": 1, "distance": 15, "yardLine": 20, "downDistanceText": "1st & 15 at LV 20", "possessionText": "LV 20" },
+              "start": {
+                "down": 1,
+                "distance": 15,
+                "yardLine": 20,
+                "downDistanceText": "1st & 15 at LV 20",
+                "possessionText": "LV 20"
+              },
+              "end": {
+                "down": 1,
+                "distance": 15,
+                "yardLine": 20,
+                "downDistanceText": "1st & 15 at LV 20",
+                "possessionText": "LV 20"
+              },
               "isPenalty": true,
               "isTurnover": false
             },
             {
               "id": "4018732869003",
               "sequenceNumber": "8200",
-              "type": { "id": "3", "text": "Pass Incompletion" },
+              "type": {
+                "id": "3",
+                "text": "Pass Incompletion"
+              },
               "text": "C.Stroud pass short right to N.Collins to HOU 42 for 8 yards (J.Bennett). The replay official reviewed the pass completion ruling, and the play was REVERSED. C.Stroud pass incomplete short right to N.Collins.",
               "awayScore": 0,
               "homeScore": 7,
-              "period": { "number": 2 },
-              "clock": { "displayValue": "10:01" },
+              "period": {
+                "number": 2
+              },
+              "clock": {
+                "displayValue": "10:01"
+              },
               "scoringPlay": false,
               "statYardage": 0,
-              "start": { "down": 2, "distance": 10, "yardLine": 34, "downDistanceText": "2nd & 10 at HOU 34", "possessionText": "HOU 34" },
-              "end": { "down": 3, "distance": 10, "yardLine": 34, "downDistanceText": "3rd & 10 at HOU 34", "possessionText": "HOU 34" },
+              "start": {
+                "down": 2,
+                "distance": 10,
+                "yardLine": 34,
+                "downDistanceText": "2nd & 10 at HOU 34",
+                "possessionText": "HOU 34"
+              },
+              "end": {
+                "down": 3,
+                "distance": 10,
+                "yardLine": 34,
+                "downDistanceText": "3rd & 10 at HOU 34",
+                "possessionText": "HOU 34"
+              },
               "isPenalty": false,
               "isTurnover": false
             },
             {
               "id": "4018732869004",
               "sequenceNumber": "8300",
-              "type": { "id": "3", "text": "Pass Incompletion" },
+              "type": {
+                "id": "3",
+                "text": "Pass Incompletion"
+              },
               "text": "Houston challenged the pass completion ruling, and the play was Upheld.",
               "awayScore": 0,
               "homeScore": 7,
-              "period": { "number": 2 },
-              "clock": { "displayValue": "9:40" },
+              "period": {
+                "number": 2
+              },
+              "clock": {
+                "displayValue": "9:40"
+              },
               "scoringPlay": false,
               "statYardage": 0,
-              "start": { "down": 3, "distance": 10, "yardLine": 34, "downDistanceText": "3rd & 10 at HOU 34", "possessionText": "HOU 34" },
-              "end": { "down": 3, "distance": 10, "yardLine": 34, "downDistanceText": "3rd & 10 at HOU 34", "possessionText": "HOU 34" },
+              "start": {
+                "down": 3,
+                "distance": 10,
+                "yardLine": 34,
+                "downDistanceText": "3rd & 10 at HOU 34",
+                "possessionText": "HOU 34"
+              },
+              "end": {
+                "down": 3,
+                "distance": 10,
+                "yardLine": 34,
+                "downDistanceText": "3rd & 10 at HOU 34",
+                "possessionText": "HOU 34"
+              },
               "isPenalty": false,
               "isTurnover": false
             },
             {
               "id": "4018732869005",
               "sequenceNumber": "8400",
-              "type": { "text": "Pass Reception" },
+              "type": {
+                "text": "Pass Reception"
+              },
               "text": "Play under review.",
               "awayScore": 0,
               "homeScore": 7,
-              "period": { "number": 2 },
-              "clock": { "displayValue": "9:12" },
+              "period": {
+                "number": 2
+              },
+              "clock": {
+                "displayValue": "9:12"
+              },
               "scoringPlay": false,
               "statYardage": 0,
-              "start": { "down": 1, "distance": 10, "yardLine": 40, "downDistanceText": "1st & 10 at HOU 40", "possessionText": "HOU 40" },
-              "end": { "down": 1, "distance": 10, "yardLine": 40, "downDistanceText": "1st & 10 at HOU 40", "possessionText": "HOU 40" },
+              "start": {
+                "down": 1,
+                "distance": 10,
+                "yardLine": 40,
+                "downDistanceText": "1st & 10 at HOU 40",
+                "possessionText": "HOU 40"
+              },
+              "end": {
+                "down": 1,
+                "distance": 10,
+                "yardLine": 40,
+                "downDistanceText": "1st & 10 at HOU 40",
+                "possessionText": "HOU 40"
+              },
               "isPenalty": false,
               "isTurnover": false
             },
             {
               "id": "4018732869006",
               "sequenceNumber": "8500",
-              "type": { "id": "5", "text": "Rush" },
+              "type": {
+                "id": "5",
+                "text": "Rush"
+              },
               "text": "W.Marks left tackle to HOU 42 for 2 yards (T.Wilson).",
               "awayScore": 0,
               "homeScore": 7,
-              "period": { "number": 2 },
-              "clock": { "displayValue": "9:00" },
+              "period": {
+                "number": 2
+              },
+              "clock": {
+                "displayValue": "9:00"
+              },
               "scoringPlay": false,
               "statYardage": 2,
-              "start": { "down": 2, "distance": 8, "yardLine": 40, "downDistanceText": "2nd & 8 at HOU 40", "possessionText": "HOU 40" },
-              "end": { "down": 3, "distance": 6, "yardLine": 42, "downDistanceText": "3rd & 6 at HOU 42", "possessionText": "HOU 42" },
+              "start": {
+                "down": 2,
+                "distance": 8,
+                "yardLine": 40,
+                "downDistanceText": "2nd & 8 at HOU 40",
+                "possessionText": "HOU 40"
+              },
+              "end": {
+                "down": 3,
+                "distance": 6,
+                "yardLine": 42,
+                "downDistanceText": "3rd & 6 at HOU 42",
+                "possessionText": "HOU 42"
+              },
               "isPenalty": false,
               "isTurnover": false
             },
             {
               "id": "4018732869007",
               "sequenceNumber": "8600",
-              "type": { "id": "8", "text": "Penalty", "abbreviation": "PEN" },
+              "type": {
+                "id": "8",
+                "text": "Penalty",
+                "abbreviation": "PEN"
+              },
               "text": "PENALTY on LV-K.Miller, False Start, 5 yards, enforced at HST 19 - No Play.",
               "awayScore": 0,
               "homeScore": 7,
-              "period": { "number": 2 },
-              "clock": { "displayValue": "8:51" },
+              "period": {
+                "number": 2
+              },
+              "clock": {
+                "displayValue": "8:51"
+              },
               "scoringPlay": false,
               "statYardage": -5,
-              "start": { "down": 1, "distance": 10, "yardLine": 19, "yardsToEndzone": 19, "downDistanceText": "1st & 10 at HOU 19", "possessionText": "HOU 19", "team": { "id": "13" } },
-              "end": { "down": 1, "distance": 15, "yardLine": 14, "yardsToEndzone": 14, "downDistanceText": "1st & 15 at HOU 14", "possessionText": "HOU 14", "team": { "id": "13" } },
+              "start": {
+                "down": 1,
+                "distance": 10,
+                "yardLine": 19,
+                "yardsToEndzone": 19,
+                "downDistanceText": "1st & 10 at HOU 19",
+                "possessionText": "HOU 19",
+                "team": {
+                  "id": "13"
+                }
+              },
+              "end": {
+                "down": 1,
+                "distance": 15,
+                "yardLine": 14,
+                "yardsToEndzone": 14,
+                "downDistanceText": "1st & 15 at HOU 14",
+                "possessionText": "HOU 14",
+                "team": {
+                  "id": "13"
+                }
+              },
               "isPenalty": true,
               "isTurnover": false,
-              "penalty": { "yards": 5, "type": { "slug": "false-start", "text": "False Start" }, "status": { "slug": "accepted", "text": "Accepted" } }
+              "penalty": {
+                "yards": 5,
+                "type": {
+                  "slug": "false-start",
+                  "text": "False Start"
+                },
+                "status": {
+                  "slug": "accepted",
+                  "text": "Accepted"
+                }
+              }
+            },
+            {
+              "id": "4018732869008",
+              "sequenceNumber": "8700",
+              "type": {
+                "id": "8",
+                "text": "Penalty",
+                "abbreviation": "PEN"
+              },
+              "text": "(Shotgun) C.Stroud pass short right to N.Collins for 14 yards, TOUCHDOWN NULLIFIED by Penalty.PENALTY on HOU-L.Tunsil, Offensive Holding, 10 yards, enforced at HST 14 - No Play.",
+              "awayScore": 0,
+              "homeScore": 7,
+              "period": {
+                "number": 2
+              },
+              "clock": {
+                "displayValue": "8:44"
+              },
+              "scoringPlay": false,
+              "statYardage": -10,
+              "start": {
+                "down": 1,
+                "distance": 15,
+                "yardLine": 14,
+                "yardsToEndzone": 14,
+                "downDistanceText": "1st & 15 at HOU 14",
+                "possessionText": "HOU 14",
+                "team": {
+                  "id": "13"
+                }
+              },
+              "end": {
+                "down": 1,
+                "distance": 25,
+                "yardLine": 24,
+                "yardsToEndzone": 24,
+                "downDistanceText": "1st & 25 at HOU 24",
+                "possessionText": "HOU 24",
+                "team": {
+                  "id": "13"
+                }
+              },
+              "isPenalty": true,
+              "isTurnover": false,
+              "penalty": {
+                "yards": 10,
+                "type": {
+                  "slug": "offensive-holding",
+                  "text": "Offensive Holding"
+                },
+                "status": {
+                  "slug": "accepted",
+                  "text": "Accepted"
+                }
+              }
             }
           ]
         }

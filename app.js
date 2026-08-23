@@ -39,15 +39,16 @@
   };
 
   /* One shared filter row for all three booth feeds (day chat, Flags &
-   * Reviews, Red Zone). "At risk" selects the events that removed points or
-   * still could — the ones worth manual review. */
+   * Reviews, Red Zone). "Nullified" selects the events that took a score off
+   * the board: a touchdown, field goal, PAT or 2-point conversion nullified,
+   * or points ESPN actually removed from the running score. */
   const BOOTH_FILTERS = [
     ['all', 'All'],
     ['penalty', 'Flags'],
     ['challenge', 'Challenges'],
     ['replay', 'Replay'],
     ['review', 'Under review'],
-    ['risk', 'At risk']
+    ['nullified', 'Nullified']
   ];
 
   /* The all-games live booth gets one extra chip: the per-game Red Zone cut
@@ -57,35 +58,31 @@
    * tab already IS this cut for one game. */
   const DAY_BOOTH_FILTERS = BOOTH_FILTERS.concat([['redzone', 'Red zone']]);
 
-  function nullifiableScoringText(text) {
-    const t = String(text || '').toLowerCase();
-    return /\btouchdown\b/.test(t) || /\bfield goal\b/.test(t) ||
-      /\bextra point\b/.test(t) || /\b(two-point|2-point)\b/.test(t) ||
-      /\bsafety\b/.test(t);
-  }
-
-  function boothEventAtRisk(e) {
+  /* A booth event counts as a nullification when a score came off the board:
+   * ESPN's running score dropped, or the play text reports the score as
+   * NULLIFIED / wiped by a "- No Play" foul / REVERSED on review. The whole
+   * decision lives in NFLMap so the feeds, the Red Zone tab and the alert
+   * sound can never disagree about what a nullified play is. */
+  function boothEventNullified(e) {
     if (!e) return false;
-    if (e.removesPoints) return true;
-    if (!e.atRisk) return false;
-    const scoringText = (e.relatedScoringPlay && (e.relatedScoringPlay.text || e.relatedScoringPlay.type)) || (e.text || '');
-    return nullifiableScoringText(scoringText);
+    if (e.nullified != null) return !!e.nullified;
+    return NFLMap.boothEventNullifies(e);
   }
 
   function boothKindCounts(events) {
-    const counts = { all: events.length, penalty: 0, challenge: 0, replay: 0, review: 0, risk: 0, redzone: 0 };
+    const counts = { all: events.length, penalty: 0, challenge: 0, replay: 0, review: 0, nullified: 0, redzone: 0 };
     events.forEach(function (e) {
       if (e && e.kind != null && counts[e.kind] != null) counts[e.kind] += 1;
-      if (boothEventAtRisk(e)) counts.risk += 1;
-      if (e && e.redZone && boothEventAtRisk(e)) counts.redzone += 1;
+      if (boothEventNullified(e)) counts.nullified += 1;
+      if (e && e.redZone && boothEventNullified(e)) counts.redzone += 1;
     });
     return counts;
   }
 
   function boothEventShown(e, filter) {
     if (!filter || filter === 'all') return true;
-    if (filter === 'risk') return boothEventAtRisk(e);
-    if (filter === 'redzone') return !!(e.redZone && boothEventAtRisk(e));
+    if (filter === 'nullified') return boothEventNullified(e);
+    if (filter === 'redzone') return !!(e.redZone && boothEventNullified(e));
     return e.kind === filter;
   }
 
@@ -156,9 +153,9 @@
     daySummaries: {},      // eventId -> { drives, situation, final }
     summaryRequests: {},   // eventId -> { promise, final } for an in-flight fetch
     dayFeed: { items: [], primed: false }, // day-wide booth chat feed
-    dayBoothRisk: {},      // eventId -> newest booth event's points state, for card badges
+    dayBoothNullified: {}, // eventId -> newest booth event's nullification state, for card badges
     dayBoothFilter: 'all', // day-wide booth filter, incl. the 'redzone' cut
-    alertedBoothKeys: {},   // non-penalty booth events already announced
+    alertedBoothKeys: {},   // nullified booth events already announced
     audioContext: null,     // created only after a user gesture (autoplay policy)
     soundEnabled: true,     // booth alert sound; ON by default so existing alerts still play
     polling: null
@@ -393,14 +390,14 @@
     const reviewBadge = (liveBooth && liveBooth.kind === 'review')
       ? '<span class="badge review">REVIEW</span>'
       : '';
-    // Points state of this game's newest booth event, recomputed on every
-    // one-second booth pass (see renderDayBooth): still on the board but
-    // could come off, or already taken off.
-    const risk = state.dayBoothRisk[ev.id];
-    const riskBadge = risk
-      ? (risk.removesPoints
+    // Nullification state of this game's newest booth event, recomputed on
+    // every one-second booth pass (see renderDayBooth): a score was taken
+    // off the board on that play.
+    const nullified = state.dayBoothNullified[ev.id];
+    const nullBadge = nullified
+      ? (nullified.removesPoints
         ? '<span class="badge removed">PTS REMOVED</span>'
-        : (risk.atRisk ? '<span class="badge atrisk">PTS AT RISK</span>' : ''))
+        : '<span class="badge removed">NULLIFIED</span>')
       : '';
     const aria = esc(away.abbr) + ' at ' + esc(home.abbr) + ', ' + esc(st.text) +
       (away.score !== '' && home.score !== '' ? ', ' + esc(away.score) + ' to ' + esc(home.score) : '') +
@@ -409,7 +406,7 @@
       '<article class="game-card" data-id="' + esc(ev.id) + '" tabindex="0" role="button" aria-label="' + aria + '">' +
         '<div class="card-top">' +
           '<span class="badge ' + st.cls + '">' + esc(st.text) + sub + '</span>' +
-          reviewBadge + riskBadge + bcast +
+          reviewBadge + nullBadge + bcast +
         '</div>' +
         teamRowHTML(away) +
         teamRowHTML(home) +
@@ -494,9 +491,9 @@
   function boothCardSignature(ev) {
     if (!ev) return '';
     const liveBooth = lastPlayBooth(ev);
-    const risk = state.dayBoothRisk[ev.id];
+    const nullified = state.dayBoothNullified[ev.id];
     return (liveBooth && liveBooth.kind === 'review' ? 'review' : '') + ':' +
-      (risk ? (risk.removesPoints ? 'removed' : (risk.atRisk ? 'risk' : '')) : '');
+      (nullified ? (nullified.removesPoints ? 'removed' : 'nullified') : '');
   }
 
   /* ----------------------- day-wide live booth chat ---------------------- */
@@ -609,7 +606,7 @@
             }
             // renderDayBooth refreshes the day feed and this game's card-badge
             // state; then repaint the cards only when a badge (review /
-            // points at risk / points removed) actually changed.
+            // nullified / points removed) actually changed.
             renderDayBooth();
             if (boothCardSignature(ev) !== cardSigBefore &&
                 !$('scoreboard-view').classList.contains('hidden')) {
@@ -700,10 +697,11 @@
       const key = event && event.key != null ? String(event.key) : '';
       if (!key || state.alertedBoothKeys[key]) return;
       state.alertedBoothKeys[key] = true;
-      // Challenges, replay reviews and under-review plays always announce.
-      // Ordinary penalties stay silent, except when the flag removes points
-      // or puts them at risk — that is exactly the moment to look up.
-      if (event.kind !== 'penalty' || boothEventAtRisk(event)) shouldBuzz = true;
+      // The buzzer is reserved for nullifications: a touchdown, field goal,
+      // PAT or 2-point conversion wiped out, or points ESPN took off the
+      // running score. Ordinary flags, challenges and pending reviews stay
+      // silent — they are still listed in the feed.
+      if (boothEventNullified(event)) shouldBuzz = true;
     });
     if (shouldBuzz && state.soundEnabled) buzzBoothAlert();
   }
@@ -728,14 +726,16 @@
       const cachedPlay = cached && cached.situation && cached.situation.lastPlay;
       const lastPlay = cachedPlay || (ev.situation && ev.situation.lastPlay) || null;
       const events = NFLMap.boothEvents(cached && cached.drives, lastPlay);
-      // The newest booth event's points state drives the game card's
-      // PTS AT RISK / PTS REMOVED badge (events are sorted by sequence).
-      const lastEvent = events.length ? events[events.length - 1] : null;
-      state.dayBoothRisk[ev.id] = lastEvent
+      // The newest nullification drives the game card's NULLIFIED /
+      // PTS REMOVED badge (events are sorted by sequence, newest last).
+      let lastNullified = null;
+      for (let i = events.length - 1; i >= 0; i -= 1) {
+        if (boothEventNullified(events[i])) { lastNullified = events[i]; break; }
+      }
+      state.dayBoothNullified[ev.id] = lastNullified
         ? {
-          atRisk: !!lastEvent.atRisk,
-          removesPoints: !!lastEvent.removesPoints,
-          points: lastEvent.pointsAtRisk || lastEvent.pointsRemoved || 0
+          removesPoints: !!lastNullified.removesPoints,
+          points: lastNullified.pointsRemoved || 0
         }
         : null;
       return {
@@ -804,33 +804,25 @@
     }).length;
     const foot =
       'Every flag &amp; review from all of today&rsquo;s games · pulled from ESPN play-by-play · ' +
-      'tracks score before &rarr; during &rarr; after when a flag/review removes points or puts them at risk · ' +
-      'covers TD, FG, safety, PAT & 2-pt · window ' + NFLMap.BOOTH_AT_RISK_LOOKBACK + ' plays before kickoff · ' +
+      'tracks score before &rarr; during &rarr; after when a nullified score comes off the board · ' +
+      'nullified &amp; red zone cover TD, FG, PAT &amp; 2-pt only · ' +
       LIVE_REVIEW_SECONDS + 's live polling schedule' +
       (scannable ? ' · games scanned ' + scanned + ' of ' + scannable : '') +
       (liveCount ? ' · ' + liveCount + ' game' + (liveCount === 1 ? '' : 's') + ' live' : '');
 
-    // Top banner when any game has points at risk or removed – makes the
-    // possibility obvious the moment it happens live, for manual review.
-    const atRiskAll = items.filter(function (e) { return e.atRisk && !e.removesPoints; });
-    const removedAll = items.filter(function (e) { return e.removesPoints; });
+    // Top banner listing the day's nullified scores – the only thing these
+    // feeds track beyond the plain flag/review log.
+    const nullifiedAll = items.filter(boothEventNullified);
     let topBanner = '';
-    if (atRiskAll.length) {
-      const summary = atRiskAll.slice(0, 3).map(function (e) {
-        return esc(e.shortName + ': ' + e.awayAbbr + '/' + e.homeAbbr + ' ' + e.pointsAtRisk + 'pts');
+    if (nullifiedAll.length) {
+      const summary = nullifiedAll.slice(0, 3).map(function (e) {
+        const pts = e.removesPoints ? ' ' + e.pointsRemoved + 'pts' : '';
+        return esc(e.shortName + ':' + pts);
       }).join(', ');
-      const more = atRiskAll.length > 3 ? ' +' + (atRiskAll.length - 3) + ' more' : '';
-      topBanner = '<div class="booth-banner atrisk-banner day-atrisk-banner" role="status">' +
-        '<span class="badge atrisk">' + atRiskAll.length + ' PTS AT RISK</span>' +
-        '<span>Live – scores could be removed: ' + summary + more + ' – manual review needed. Filter At risk.</span>' +
-      '</div>';
-    } else if (removedAll.length) {
-      const summary = removedAll.slice(0, 3).map(function (e) {
-        return esc(e.shortName + ' ' + e.pointsRemoved + 'pts removed');
-      }).join(', ');
+      const more = nullifiedAll.length > 3 ? ' +' + (nullifiedAll.length - 3) + ' more' : '';
       topBanner = '<div class="booth-banner removed-banner day-removed-banner" role="status">' +
-        '<span class="badge removed">PTS REMOVED</span>' +
-        '<span>' + removedAll.length + ' scoring play(s) taken off: ' + summary + '</span>' +
+        '<span class="badge removed">' + nullifiedAll.length + ' NULLIFIED</span>' +
+        '<span>Scores taken off the board: ' + summary + more + ' – filter Nullified.</span>' +
       '</div>';
     }
 
@@ -840,10 +832,13 @@
         (scanned < scannable
           ? 'Scanning today&rsquo;s games for flags and reviews&hellip;'
           : (filter === 'redzone' && counts.all
-            ? 'No flags, challenges, or replay reviews started in the red zone ' +
-              '(the opponent&rsquo;s 20 or inside) &mdash; this day&rsquo;s booth events ' +
-              'all came from farther out.'
-            : 'No flags or reviews on this day yet &mdash; kickoff hasn&rsquo;t happened, or the games were clean.')) +
+            ? 'No nullified scores in the red zone (the opponent&rsquo;s 20 or inside) ' +
+              'today &mdash; no touchdown, field goal, PAT or 2-pt conversion has been ' +
+              'wiped out from there.'
+            : (filter === 'nullified' && counts.all
+              ? 'No nullified scores today &mdash; no touchdown, field goal, PAT or ' +
+                '2-pt conversion has been taken off the board.'
+              : 'No flags or reviews on this day yet &mdash; kickoff hasn&rsquo;t happened, or the games were clean.'))) +
         '</div>';
     } else {
       body = '<div class="day-feed" role="log" aria-live="polite" aria-relevant="additions">' +
@@ -855,7 +850,7 @@
 
     const soundOn = !!state.soundEnabled;
     const soundTitle = soundOn
-      ? 'Alert sound ON - buzzes on new challenges and replay reviews. Click to mute.'
+      ? 'Alert sound ON - buzzes only when a score is nullified. Click to mute.'
       : 'Alert sound OFF - click to enable and test the alert buzz.';
     return '<div class="booth day-booth">' +
       '<div class="booth-head">' +
@@ -891,20 +886,15 @@
           (removedAbbr ? esc(removedAbbr) + ' ' : '') +
           '&minus;' + esc(e.pointsRemoved) + ' PTS</span>'
       : '';
-    // Points that could still come off (pending review, unresolved
-    // challenge/flag after a fresh score): highlighted so the moment is
-    // obvious while it is still live, not only after the score drops.
-    const riskAbbr = e.atRiskTeam === 'away' ? awayAbbr
-      : (e.atRiskTeam === 'home' ? homeAbbr : '');
-    const riskBadge = (e.atRisk && !e.removesPoints)
-      ? '<span class="badge atrisk">' +
-          (riskAbbr ? esc(riskAbbr) + ' ' : '') +
-          esc(e.pointsAtRisk) + ' PTS AT RISK</span>'
+    // A nullification ESPN has not published a score drop for yet (the text
+    // says NULLIFIED / No Play / REVERSED) still gets flagged here.
+    const nullifiedBadge = (!e.removesPoints && boothEventNullified(e))
+      ? '<span class="badge removed">NULLIFIED</span>'
       : '';
-    const related = (e.removesPoints || e.atRisk) && e.relatedScoringPlay && e.relatedScoringPlay.text
+    const related = boothEventNullified(e) && e.relatedScoringPlay && e.relatedScoringPlay.text
       ? '<span class="booth-note">' + esc(e.relatedScoringPlay.text) + '</span>'
       : '';
-    const stateCls = e.removesPoints ? ' removed' : (e.atRisk ? ' atrisk' : '');
+    const stateCls = boothEventNullified(e) ? ' removed' : '';
     return '<span class="booth-state' + stateCls + '">' +
       '<span class="bsh-label">Score</span>' +
       '<span class="bsh-before">' + esc(before) + '</span>' +
@@ -913,7 +903,7 @@
       '<span class="bsh-arrow">&#8594;</span>' +
       '<span class="bsh-after' + (e.removesPoints ? ' removed' : '') + '">' + esc(after) + '</span>' +
       removedBadge +
-      riskBadge +
+      nullifiedBadge +
     '</span>' +
     related;
   }
@@ -944,26 +934,26 @@
     const rz = e.redZone
       ? '<span class="badge rz" title="Play started in the red zone (opponent&rsquo;s 20 or inside)">RZ</span>'
       : '';
-    const riskChip = (e.atRisk && !e.removesPoints)
-      ? '<span class="badge atrisk" title="A nearby score could still be taken off the board">PTS AT RISK</span>'
+    const isNullified = boothEventNullified(e);
+    const nullChip = (isNullified && !e.removesPoints)
+      ? '<span class="badge removed" title="A score was nullified on this play">NULLIFIED</span>'
       : '';
     const state = boothScoreTrailHTML(e, e.awayAbbr, e.homeAbbr);
     const aria = esc(e.shortName) + ', ' + esc(kind) + ': ' + esc(e.text) +
       (e.removesPoints ? ', removed ' + esc(e.pointsRemoved) + ' points' : '') +
-      (e.atRisk && !e.removesPoints ? ', ' + esc(e.pointsAtRisk) + ' points at risk' : '') +
+      (isNullified && !e.removesPoints ? ', score nullified' : '') +
       (e.redZone ? ', in the red zone' : '') +
       '. Open this game.';
     return '' +
       '<button type="button" class="booth-msg day-msg ' + esc(e.kind) +
-        (e.atRisk && !e.removesPoints ? ' atrisk' : '') +
-        (e.removesPoints ? ' pts-removed' : '') +
+        (isNullified ? ' pts-removed' : '') +
         '" data-id="' + esc(e.gameId) + '" aria-label="' + aria + '">' +
         '<span class="booth-msg-top">' +
           '<span class="day-game">' + esc(e.shortName) + '</span>' +
           liveTag +
           '<span class="badge ' + esc(e.kind) + '">' + esc(kind) + '</span>' +
           rz +
-          riskChip +
+          nullChip +
           (result ? '<span class="badge result ' + esc(e.result) + '">' + esc(result) + '</span>' : '') +
           '<span class="booth-when">' + esc(when) + '</span>' +
           (score ? '<span class="booth-score">' + score + '</span>' : '') +
@@ -1181,51 +1171,31 @@
     const lastText = lastPlay ? (lastPlay.text || lastPlay.shortText || '') : '';
     const livePending = !!(current() && current().status && current().status.state === 'in' && lastPlay &&
       (NFLMap.classifyBooth(lastPlay) === 'review' || NFLMap.boothResult(lastText) === 'pending'));
-    // When the play under review carries points (e.g. a ruled touchdown
-    // waiting on the verdict), shout that from the banner too.
-    const lastEvent = events.length ? events[events.length - 1] : null;
-    const bannerRisk = (livePending && lastEvent && lastEvent.atRisk && !lastEvent.removesPoints)
-      ? '<span class="badge atrisk">' + esc(lastEvent.pointsAtRisk) + ' PTS AT RISK</span>'
-      : '';
-
-    // New: a persistent at-risk banner whenever ANY event in the current feed
-    // is at risk or has removed points, even if the live lastPlay is not
-    // currently under review. This makes the possibility obvious for manual
-    // review without waiting for the UNDER REVIEW banner.
-    const atRiskEvents = events.filter(function (e) { return e.atRisk && !e.removesPoints; });
-    const removedEvents = events.filter(function (e) { return e.removesPoints; });
-    const atRiskBanner = (!livePending && atRiskEvents.length)
-      ? '<div class="booth-banner atrisk-banner" role="status">' +
-          '<span class="badge atrisk">' + atRiskEvents.length + ' PTS AT RISK</span>' +
-          '<span>Score could be removed – ' +
-            atRiskEvents.map(function (e) {
-              const team = e.atRiskTeam === 'away' ? (current() && current().away ? current().away.abbr : 'AWAY')
-                : (current() && current().home ? current().home.abbr : 'HOME');
-              return esc(team + ' ' + e.pointsAtRisk + 'pts');
-            }).join(', ') +
-          ' – manual review needed. Switch to At risk filter.</span>' +
-        '</div>'
-      : '';
-    const removedBanner = (!livePending && !atRiskEvents.length && removedEvents.length)
+    // A persistent banner whenever ANY event in the feed nullified a score,
+    // even if the live lastPlay is not currently under review.
+    const nullifiedEvents = events.filter(boothEventNullified);
+    const nullifiedBanner = (!livePending && nullifiedEvents.length)
       ? '<div class="booth-banner removed-banner" role="status">' +
-          '<span class="badge removed">PTS REMOVED</span>' +
-          '<span>' + removedEvents.length + ' scoring play(s) taken off the board – ' +
-            removedEvents.map(function (e) {
-              return esc(e.pointsRemoved + 'pts ' + (e.removedTeam || ''));
+          '<span class="badge removed">' + nullifiedEvents.length + ' NULLIFIED</span>' +
+          '<span>Score taken off the board – ' +
+            nullifiedEvents.map(function (e) {
+              if (!e.removesPoints) return esc(e.heading || 'nullified score');
+              const team = e.removedTeam === 'away' ? (current() && current().away ? current().away.abbr : 'AWAY')
+                : (current() && current().home ? current().home.abbr : 'HOME');
+              return esc(team + ' ' + e.pointsRemoved + 'pts');
             }).join(', ') +
-          '</span>' +
+          ' – switch to the Nullified filter.</span>' +
         '</div>'
       : '';
 
     const underReviewBanner = livePending
       ? '<div class="booth-banner" role="status">' +
           '<span class="badge review">UNDER REVIEW</span>' +
-          bannerRisk +
           '<span>' + esc(lastText) + '</span>' +
         '</div>'
       : '';
 
-    const banner = underReviewBanner + atRiskBanner + removedBanner;
+    const banner = underReviewBanner + nullifiedBanner;
 
     let body;
     if (!visible.length) {
@@ -1241,9 +1211,9 @@
     // Literal arrows (not &rarr; entities): foot passes through esc() below.
     const live = current() && current().status && current().status.state === 'in';
     const foot = live
-      ? 'Live booth log · pulled from ESPN play-by-play · tracks score before → during → after when points are removed or at risk · ' +
-        LIVE_REVIEW_SECONDS + 's polling schedule · window ' + NFLMap.BOOTH_AT_RISK_LOOKBACK + ' plays before kickoff'
-      : 'Booth log · pulled from ESPN play-by-play · tracks score before → during → after when points are removed or at risk · covers TD, FG, safety, PAT & 2-pt';
+      ? 'Live booth log · pulled from ESPN play-by-play · tracks score before → during → after when a nullified score comes off the board · ' +
+        LIVE_REVIEW_SECONDS + 's polling schedule'
+      : 'Booth log · pulled from ESPN play-by-play · tracks score before → during → after when a nullified score comes off the board · nullified covers TD, FG, PAT & 2-pt';
 
     return '<div class="booth">' +
       '<div class="booth-head">' +
@@ -1284,19 +1254,19 @@
     const rz = e.redZone
       ? '<span class="badge rz" title="Play started in the red zone (opponent&rsquo;s 20 or inside)">RZ</span>'
       : '';
-    const riskChip = (e.atRisk && !e.removesPoints)
-      ? '<span class="badge atrisk" title="A nearby score could still be taken off the board">PTS AT RISK</span>'
+    const isNullified = boothEventNullified(e);
+    const nullChip = (isNullified && !e.removesPoints)
+      ? '<span class="badge removed" title="A score was nullified on this play">NULLIFIED</span>'
       : '';
     return '' +
       '<article class="booth-msg ' + esc(e.kind) + (isNew ? ' new' : '') +
-        (e.atRisk && !e.removesPoints ? ' atrisk' : '') +
-        (e.removesPoints ? ' pts-removed' : '') + '">' +
+        (isNullified ? ' pts-removed' : '') + '">' +
         '<div class="booth-msg-top">' +
           '<span class="booth-when">' + esc(when) + '</span>' +
           liveTag +
           '<span class="badge ' + esc(e.kind) + '">' + esc(kind) + '</span>' +
           rz +
-          riskChip +
+          nullChip +
           (result ? '<span class="badge result ' + esc(e.result) + '">' + esc(result) + '</span>' : '') +
           '<span class="booth-score">' + score + '</span>' +
         '</div>' +
@@ -1310,19 +1280,23 @@
 
   /* ------------------------------- red zone ------------------------------ */
   /*
-   * The Red Zone tab: the same booth feed (flags, challenges, replay reviews
-   * and under-review plays) filtered to events whose play STARTED in the
-   * red zone — the opponent's 20-yard line or inside. Red zone membership
-   * comes from NFLMap.boothEvent(...).redZone, which is computed only from
-   * the verified play position fields (see lib/mapping.js); an event whose
-   * distance could not be established is never shown here.
+   * The Red Zone tab: booth events (flags, challenges, replay reviews) that
+   * BOTH
+   *   - started in the red zone — the opponent's 20-yard line or inside.
+   *     Membership comes from NFLMap.boothEvent(...).redZone, computed only
+   *     from the verified play position fields (see lib/mapping.js); an
+   *     event whose distance could not be established is never shown, AND
+   *   - nullified a score: a touchdown / field goal / PAT / 2-pt conversion
+   *     reported as NULLIFIED, wiped by a "- No Play" foul, or REVERSED on
+   *     review, or points ESPN actually removed from the running score
+   *     (NFLMap.boothEventNullifies — see lib/mapping.js).
    */
 
   function renderRedZone(el) {
     const events = NFLMap.boothEvents(
       state.summary && state.summary.drives,
       liveLastPlay()
-    ).filter(function (e) { return e.redZone && boothEventAtRisk(e); });
+    ).filter(function (e) { return e.redZone && boothEventNullified(e); });
     const feed = el.querySelector('.booth-feed');
     const prevScroll = feed ? feed.scrollTop : 0;
     const nearBottom = !feed ||
@@ -1346,24 +1320,23 @@
 
     const filters = boothFiltersHTML(filter, counts, 'data-redzone-filter', '');
 
-    const atRiskEvents = events.filter(function (e) { return e.atRisk && !e.removesPoints; });
-    const removedEvents = events.filter(function (e) { return e.removesPoints; });
     let topBanner = '';
-    if (atRiskEvents.length) {
-      topBanner = '<div class="booth-banner atrisk-banner" role="status">' +
-        '<span class="badge atrisk">' + atRiskEvents.length + ' PTS AT RISK IN RZ</span>' +
-        '<span>Red zone scores could be removed – manual review needed.</span>' +
-      '</div>';
-    } else if (removedEvents.length) {
+    if (events.length) {
+      const removedPts = events.reduce(function (sum, e) {
+        return sum + (e.removesPoints ? Number(e.pointsRemoved) || 0 : 0);
+      }, 0);
       topBanner = '<div class="booth-banner removed-banner" role="status">' +
-        '<span class="badge removed">PTS REMOVED IN RZ</span>' +
-        '<span>' + removedEvents.length + ' red zone scoring play(s) taken off.</span>' +
+        '<span class="badge removed">' + events.length + ' NULLIFIED IN RZ</span>' +
+        '<span>' + events.length + ' red zone scoring play(s) taken off the board' +
+          (removedPts ? ' – ' + removedPts + ' pts removed' : '') + '.</span>' +
       '</div>';
     }
 
     let body;
     if (!visible.length) {
-      body = '<div class="empty booth-empty">No flags, challenges, or replay reviews in the red zone yet.</div>';
+      body = '<div class="empty booth-empty">No nullified red zone scores yet &mdash; ' +
+        'no touchdown, field goal, PAT or 2-pt conversion has been wiped out ' +
+        'from the opponent&rsquo;s 20 or inside.</div>';
     } else {
       body = '<div class="booth-feed" role="log" aria-live="polite" aria-relevant="additions">' +
         visible.map(function (e) { return boothMsgHTML(e, false); }).join('') +
@@ -1372,14 +1345,14 @@
 
     const live = current() && current().status && current().status.state === 'in';
     // Literal arrow: foot passes through esc() below.
-    const foot = 'Flags, challenges & replay reviews on plays that started in the ' +
-      'opponent’s 20 or inside · tracks points removed or at risk · covers TD, FG, safety, PAT & 2-pt · window ' +
-      NFLMap.BOOTH_AT_RISK_LOOKBACK + ' plays before kickoff' +
+    const foot = 'Nullified scores on plays that started in the opponent’s 20 or ' +
+      'inside · TD, FG, PAT & 2-pt wiped by NULLIFIED / No Play / REVERSED wording, ' +
+      'or points removed from the running score' +
       (live ? ' · updated every ' + LIVE_REVIEW_SECONDS + 's while live' : '');
 
     return '<div class="booth">' +
       '<div class="booth-head">' +
-        '<div class="booth-title">Red zone flags, challenges &amp; replay reviews</div>' +
+        '<div class="booth-title">Red zone nullified scores</div>' +
         '<div class="booth-sub">' + esc(foot) + '</div>' +
       '</div>' +
       topBanner +
@@ -1395,8 +1368,8 @@
     if (!drives.length) {
       return '<div class="empty">Play-by-play is not available for this game.</div>';
     }
-    // Build a map of playId -> booth event that is at risk or removed, so the
-    // play-by-play can highlight the exact moment a score could be wiped.
+    // Build a map of playId -> booth event, so the play-by-play can highlight
+    // the exact rows where a score was nullified.
     const boothEvents = currentBoothEvents();
     const boothById = boothEventsById(boothEvents);
 
@@ -1411,20 +1384,14 @@
       }
       out.push(driveSectionHTML(d, boothById));
     });
-    // If any booth event is at risk, add a top banner to the play-by-play too
-    // so the situation is obvious without switching to the Flags tab.
-    const atRiskInGame = boothEvents.filter(function (e) { return e.atRisk && !e.removesPoints; });
-    const removedInGame = boothEvents.filter(function (e) { return e.removesPoints; });
+    // If a score was nullified anywhere in this game, add a top banner to the
+    // play-by-play too, so it is obvious without switching to the Flags tab.
+    const nullifiedInGame = boothEvents.filter(boothEventNullified);
     let topBanner = '';
-    if (atRiskInGame.length) {
-      topBanner = '<div class="booth-banner atrisk-banner" role="status">' +
-        '<span class="badge atrisk">' + atRiskInGame.length + ' PTS AT RISK</span>' +
-        '<span>Play-by-play contains flags/reviews that could remove points – see highlighted rows and check Flags & Reviews At risk filter for manual review.</span>' +
-      '</div>';
-    } else if (removedInGame.length) {
+    if (nullifiedInGame.length) {
       topBanner = '<div class="booth-banner removed-banner" role="status">' +
-        '<span class="badge removed">PTS REMOVED</span>' +
-        '<span>' + removedInGame.length + ' scoring play(s) taken off the board in this game.</span>' +
+        '<span class="badge removed">' + nullifiedInGame.length + ' NULLIFIED</span>' +
+        '<span>' + nullifiedInGame.length + ' scoring play(s) taken off the board in this game – see the highlighted rows, or the Flags &amp; Reviews Nullified filter.</span>' +
       '</div>';
     }
     return '<div class="pbp">' + topBanner + out.join('') + '</div>';
@@ -1456,25 +1423,21 @@
     if (p.scoring) cls.push('scoring');
     if (p.turnover) cls.push('turnover');
     if (p.penalty) cls.push('penalty');
-    if (boothEvent) {
-      if (boothEvent.removesPoints) cls.push('pts-removed');
-      if (boothEvent.atRisk && !boothEvent.removesPoints) cls.push('atrisk');
-    }
+    const nullified = boothEventNullified(boothEvent);
+    if (nullified) cls.push('pts-removed');
     const yard = p.yardage != null ? '<span class="yds">' + esc(p.yardage) + ' yds</span>' : '';
     const pen = p.penaltyText ? ' <span class="pen">(' + esc(p.penaltyText) + ')</span>' : '';
-    let riskBadge = '';
-    if (boothEvent) {
-      if (boothEvent.removesPoints) {
-        riskBadge = ' <span class="badge removed">' + esc(boothEvent.pointsRemoved) + ' PTS REMOVED</span>';
-      } else if (boothEvent.atRisk) {
-        riskBadge = ' <span class="badge atrisk">' + esc(boothEvent.pointsAtRisk) + ' PTS AT RISK</span>';
-      }
+    let nullBadge = '';
+    if (nullified) {
+      nullBadge = boothEvent.removesPoints
+        ? ' <span class="badge removed">' + esc(boothEvent.pointsRemoved) + ' PTS REMOVED</span>'
+        : ' <span class="badge removed">NULLIFIED</span>';
     }
     return '' +
       '<tr class="' + cls.join(' ') + '">' +
         '<td class="dd">' + esc(p.downDistance) + '</td>' +
         '<td class="clock">' + esc(p.clock) + '</td>' +
-        '<td class="desc">' + esc(p.text) + pen + yard + riskBadge + '</td>' +
+        '<td class="desc">' + esc(p.text) + pen + yard + nullBadge + '</td>' +
         '<td class="score">' + esc(p.awayScore) + '–' + esc(p.homeScore) + '</td>' +
       '</tr>';
   }
@@ -1603,7 +1566,7 @@
     state.daySummaries = {};
     state.summaryRequests = {};
     state.dayFeed = { items: [], primed: false };
-    state.dayBoothRisk = {};
+    state.dayBoothNullified = {};
     state.dayBoothFilter = 'all';
     state.alertedBoothKeys = {};
     $('day-booth').classList.add('hidden');

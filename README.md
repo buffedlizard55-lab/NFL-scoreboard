@@ -44,74 +44,61 @@ the repository root — no build step:
   every game of the selected day** into one live log. Messages carry the game
   (e.g. "LV @ HOU"), a LIVE badge while that game is in progress, the flag
   type and result, quarter & clock, and the play text, and can be filtered by
-  kind (All / Flags / Challenges / Replay / Under review / **At risk** /
+  kind (All / Flags / Challenges / Replay / Under review / **Nullified** /
   **Red zone** — the same cut as a game's Red Zone tab, applied across every
-  game of the day: only the flags, challenges, replay reviews, and
-  under-review plays on downs that **started in the opponent's 20-yard line
-  or inside**). New
+  game of the day: only the **nullified scores** on downs that **started in
+  the opponent's 20-yard line or inside**). New
   messages appear at the bottom as the feed discovers them, and clicking one
   opens that game's own **Flags & Reviews** tab (or its **Red Zone** tab
   while the Red zone filter is active). The scoreboard also keeps a
   **REVIEW** badge on a game card while its last play is under review, plus a
-  **PTS AT RISK** / **PTS REMOVED** badge while the game's newest booth event
-  could still take points off the board (or just did) — cards with at-risk
-  points get an orange pulsing outline so they pop in the grid. Booth events
-  also show the **score before → during → after** the event and badge the
-  events that **removed points** (for example, a touchdown taken away by an
-  offensive penalty or a replay reversal), including the scoring play that was
-  nullified. Events whose points **could still come off** — a touchdown,
-  field goal, safety, **extra point or 2-pt conversion** initially ruled good
-  with a pending review, an unresolved challenge, or a fresh flag right after
-  the score (within **6 plays** and before the ensuing kickoff) — carry a
-  pulsing orange **PTS AT RISK** badge (with the point value and the scoring
-  play at stake) so the possibility is obvious the moment it happens live,
-  before ESPN's running score ever drops. When any game has points at risk,
-  a top **PTS AT RISK banner** appears in the day booth with a summary
-  (game + points) for manual review. The booth header has a **sound toggle
-  button** (🔔 Sound On / 🔇 Sound Off) like the MLB replay feed: it is ON by
-  default so automatic alerts keep working as before, and each click plays the
-  exact same 3-second alert buzz so you can test the sound. Challenges, replay
-  reviews and under-review plays always announce; ordinary penalties stay
-  silent **except** when they remove or endanger points. The preference is
+  **NULLIFIED** / **PTS REMOVED** badge when the game's newest booth event
+  took a score off the board. Booth events also show the **score before →
+  during → after** the event and badge the events that **nullified a score**
+  (for example, a touchdown taken away by an offensive penalty or a replay
+  reversal), including the scoring play that was wiped out. The booth header
+  has a **sound toggle button** (🔔 Sound On / 🔇 Sound Off) like the MLB
+  replay feed: it is ON by default, and each click plays the exact same
+  3-second alert buzz so you can test the sound. The alert fires **only for
+  nullified scores** — flags, challenges, replay reviews and under-review
+  plays that take nothing off the board stay silent. The preference is
   remembered in the browser.
 - **Game view** (click any game) — team header with scores, records, a Q1–Q4 + T
   line-score table, venue, broadcast, and attendance, plus a prev/next game
   switcher and six tabs:
   - **Play-by-Play** — every play of every drive (down & distance, clock, play
     description, yardage, running score), highlighted for scoring plays,
-    turnovers, penalties, **PTS AT RISK** (a flag/review/challenge that could
-    still wipe a nearby TD/FG/PAT/2-pt) and **PTS REMOVED** (score actually
-    taken off). At-risk games also show a top banner in this tab.
+    turnovers, penalties, **NULLIFIED** (a TD/FG/PAT/2-pt wiped out by an
+    accepted foul or a replay reversal) and **PTS REMOVED** (score actually
+    taken off ESPN's running total). Games with nullified scores also show a
+    top banner in this tab.
   - **Flags & Reviews** — a chat-style booth log of **penalties**, **coach
     challenges**, **replay reviews**, and **plays under review**, rebuilt from
     ESPN play-by-play on a 1-second schedule while a game is live. If the same
     classified play arrives with a changed review result, its existing message
     is updated in place. Each entry tracks the running score **before →
-    during → after** the flag/review/challenge, flags events that **removed
-    points** (e.g. a 5-yard TD erased by an offensive penalty or a TD
-    reversed by replay), and names the scoring play that was nullified.
-    Events that **could still remove points** — a ruled TD/FG/safety/PAT/2-pt
-    with the review still open, a challenge awaiting its verdict, a flag right
-    after a fresh score (within 6 plays, before kickoff, and covering current-
-    play "TOUCHDOWN. Play under review." as well as delayed reviews after the
-    PAT/timeout) — get the pulsing **PTS AT RISK** badge (in the message, the
-    score trail, the live UNDER REVIEW banner, and a persistent top banner when
-    any at-risk or removed events exist), and the At-risk filter isolates
-    exactly those moments for manual review. The detection picks the
-    max-points scoring play in the window (so a review after the PAT still
-    highlights the 6-pt TD) but keeps a 1-pt PAT flag immediate after the PAT
-    as 1-pt at risk.
-  - **Red Zone** — the same booth log filtered to the red zone: only the
-    flags, challenges, replay reviews, and under-review plays on downs that
-    **started in the opponent's 20-yard line or inside**. Red-zone entries
-    carry a small red **RZ** badge in the Flags & Reviews tab and in the
-    all-games live booth chat, so red-zone trouble is visible without
-    switching tabs — and the all-games booth's filter row has a **Red zone**
-    chip that applies this same cut across every game of the day. Like the
-    booth log, it repaints on every 1-second
-    response while the game is live and can be filtered by kind
-    (All / Flags / Challenges / Replay / Under review / At risk), and its
-    entries carry the same points-removed / points-at-risk highlights.
+    during → after** the flag/review/challenge, and flags the events that
+    **nullified a score** (e.g. a 5-yard TD erased by an offensive penalty or
+    a TD reversed by replay), naming the scoring play that was wiped out.
+    A **touchdown, field goal, PAT or 2-point conversion nullified** — the
+    play text says `TOUCHDOWN NULLIFIED by Penalty`, the score is wiped by an
+    accepted `- No Play` foul, or a replay review came back `REVERSED` — or
+    points ESPN actually removed from the running score get the **NULLIFIED**
+    / **PTS REMOVED** badge (in the message, the score trail, and a persistent
+    top banner listing every nullified score of the game), and the
+    **Nullified** filter isolates exactly those moments. Nothing else is
+    tracked here: a flag or an open review that leaves the score alone is
+    listed as an ordinary booth event, never as a nullification.
+  - **Red Zone** — the **nullified scores** of the red zone: TD / FG / PAT /
+    2-pt wiped out on downs that **started in the opponent's 20-yard line or
+    inside**. Red-zone entries carry a small red **RZ** badge in the Flags &
+    Reviews tab and in the all-games live booth chat, so red-zone trouble is
+    visible without switching tabs — and the all-games booth's filter row has
+    a **Red zone** chip that applies this same cut across every game of the
+    day. Like the booth log, it repaints on every 1-second response while the
+    game is live, headlines the count with an `N NULLIFIED IN RZ` banner, and
+    can be filtered by kind (All / Flags / Challenges / Replay / Under review
+    / Nullified).
   - **Scoring Drives** — each scoring drive with team, result, plays / yards /
     time, and the score after the play (NFL.com's "Scoring Drives" style).
   - **Team Stats** — full team box score comparison (first downs, total yards,
@@ -180,28 +167,27 @@ categories (passing, rushing, …), play-by-play flattening & ordering, scoring
 drives, quarter labels, booth classification (flags / challenges / replay /
 under review), red-zone location detection (the verified `yardsToEndzone` /
 "Goal" / possession-line rules, the `0`-sentinel guard, and the no-guessing
-fallback), booth before/during/after score tracking, called-back-score
-detection, and points-at-risk detection (pending reviews of fresh scores
-including single-entry "TOUCHDOWN. Play under review.", live score-less
-lastPlay overlays, settled-safe outcomes, the kickoff-settles rule, the
-expanded 6-play lookback window before kickoff, max-points selection so a
-delayed review after the PAT still highlights the TD, immediate PAT flag
-kept as 1-pt at risk, extra point / 2-pt / FG no-good vs good distinction,
-and no re-flagging after a completed removal), day-wide feed merging /
-attribution / dedupe, in-place review result updates, null-safety, the
-15-second/1-second polling cadences, immediate repaint of both the booth and
-red zone tabs plus the new persistent at-risk top banners and play-by-play
-highlighting, visibility gating, immediate refresh, timer cleanup,
-browser-app wiring, request dedupe, the booth sound button (renders, toggles,
-and triggers the alert buzz), and rendering against an injected API-shaped
-payload — including opening a game and verifying the Red Zone tab shows only
-red-zone booth events, checking the all-games booth's Red zone filter chip
-(its count, that it cuts the day feed to red-zone flags/challenges/reviews
-only, that it counts and keeps red-zone events from **each** game of a
-two-game day, and that clicking a message while it is active opens that
-game's Red Zone tab), and that a pending review of a ruled touchdown is
-badged POINTS AT RISK in the feed and on its game card while a newly
-appearing at-risk penalty triggers the alert buzz.
+fallback), booth before/during/after score tracking, and **nullified-score
+detection** (`TOUCHDOWN NULLIFIED by Penalty`, the `- No Play` accepted-foul
+form with and without punctuation between `Penalty` and `PENALTY`, a replay
+review returning `REVERSED` on a scoring play, the FG / PAT / 2-pt variants,
+and a drop in ESPN's own running score — plus the negative cases: a plain
+flag, an open review, and a confirmed/stands verdict nullify nothing),
+day-wide feed merging / attribution / dedupe, in-place review result updates,
+null-safety, the 15-second/1-second polling cadences, immediate repaint of
+both the booth and red zone tabs plus the persistent nullified top banners and
+play-by-play highlighting, visibility gating, immediate refresh, timer
+cleanup, browser-app wiring, request dedupe, the booth sound button (renders,
+toggles, and triggers the alert buzz), and rendering against an injected
+API-shaped payload — including opening a game and verifying the Red Zone tab
+shows only nullified red-zone scores, checking the all-games booth's Red zone
+filter chip (its count, that it cuts the day feed to nullified red-zone
+scores only, that it counts and keeps them from **each** game of a two-game
+day, and that clicking a message while it is active opens that game's Red
+Zone tab), that a touchdown wiped by an accepted foul is badged NULLIFIED in
+the feed and on its game card, and that **only** nullified scores buzz — a
+plain penalty leaves the alert silent while a replay reversal that takes
+points off fires it.
 
 The booth feed does **not** call or invent a separate reviews endpoint. It
 classifies the play records returned by the summary endpoint using fields
@@ -213,18 +199,20 @@ only the per-play running scores already returned by ESPN
 (`awayScore` / `homeScore`); an event is reported as removing points only when
 that running score actually drops, so the app does not invent corrections.
 
-The `points at risk` badge is the forward-looking companion: it is raised when
-a booth event sits within a few play entries of a fresh touchdown / field
-goal / safety whose points are still counted and the event is not settled
-(`Play under review.`, a challenge without a verdict, a reversal whose score
-drop ESPN has not published yet, or an accepted/undecided flag after the
-score). It clears for settled outcomes (confirmed / stands / declined /
-offsetting), once the ensuing kickoff has been played (a flag on the kick or
-return can no longer wipe the score), and as soon as the running score
-actually drops — at which point the verified `points removed` badge takes
-over. It is a possibility flag for manual review, not a verdict, so e.g. a
-defensive flag declined after a score, or a flag during the ensuing try, can
-briefly light up before the resolution arrives.
+The `NULLIFIED` badge covers the cases where the score is already off the
+board but ESPN's running total has not moved (or never will, because the
+points were never posted). It is raised only from the officials' own wording
+in the play description — `TOUCHDOWN NULLIFIED by Penalty`, a scoring play
+wiped by an accepted foul `enforced at … - No Play`, or a replay review of a
+scoring play that came back `REVERSED` — applied to the four nullifiable
+scores (touchdown, field goal, extra point, 2-point conversion) plus a safety.
+There is no forward-looking / speculative mode: a flag that might wipe a score,
+an open `Play under review.`, and a verdict of confirmed / stands / declined /
+offsetting are all reported as ordinary booth events. The earlier
+"points at risk" prediction has been removed from the app entirely — the
+At-risk filter, its badges, its banners and its manual-review list are gone,
+and the Nullified / Red zone filters and the alert sound now agree on one
+single definition of a nullified play.
 
 Red zone membership is likewise computed only from position fields present on
 the play records. Verified against real summary responses (Raiders @ Texans,
