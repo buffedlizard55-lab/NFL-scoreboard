@@ -213,6 +213,10 @@ async function run() {
   assert.ok(elements['day-booth'].innerHTML.indexOf('badge removed') !== -1);
   assert.ok(elements['day-booth'].innerHTML.indexOf('booth-note') !== -1);
   assert.ok(elements['day-booth'].innerHTML.indexOf('Banks 2 yard run, TOUCHDOWN') !== -1);
+  // The fixture's red-zone false start (HOU 19) carries the RZ badge in the
+  // day feed; its non-red-zone counterpart (LV 25) does not.
+  assert.ok(elements['day-booth'].innerHTML.indexOf('badge rz') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('enforced at HST 19') !== -1);
   const scoreboardWritesBeforeResolution = elements['scoreboard-view'].innerHTMLWrites();
 
   // Two review ticks while one detail request is pending still create one fetch.
@@ -295,6 +299,62 @@ async function run() {
   assert.ok(elements['day-booth'].innerHTML.indexOf('&#128276; Sound On') !== -1);
   assert.ok(audio.oscillatorCount > 1, 're-enabling the sound plays the preview buzz again');
 
+  // Open the game from the scoreboard card and switch to the Red Zone tab.
+  // holdSummaries is still on, so the detail request parks in pendingSummaries.
+  elements['scoreboard-view'].dispatch('click', {
+    target: {
+      closest: function (selector) {
+        if (selector === '.day-chip') return null;
+        if (selector === '.game-card') {
+          return { getAttribute: function () { return '401873286'; } };
+        }
+        return null;
+      }
+    }
+  });
+  assert.strictEqual(pendingSummaries.length, 1, 'opening the game requests its detail');
+  pendingSummaries.shift()();
+  await flush();
+  await flush();
+  assert.strictEqual(elements['game-view'].classList.contains('hidden'), false);
+  assert.strictEqual(elements['game-content'].innerHTML.indexOf('Loading game data'), -1);
+
+  elements['tabs'].dispatch('click', {
+    target: {
+      closest: function (selector) {
+        return selector === '.tab'
+          ? { getAttribute: function () { return 'redzone'; } }
+          : null;
+      }
+    }
+  });
+  const rzHTML = elements['game-content'].innerHTML;
+  assert.ok(rzHTML.indexOf('Red zone flags, challenges &amp; replay reviews') !== -1);
+  // The red-zone false start (HOU 19) is shown, with its RZ badge.
+  assert.ok(rzHTML.indexOf('enforced at HST 19') !== -1);
+  assert.ok(rzHTML.indexOf('badge rz') !== -1);
+  // Non-red-zone booth events are excluded: the LV 25 false start, the HOU 34
+  // replay/review entries, and the live under-review play (no position data).
+  assert.ok(rzHTML.indexOf('enforced at LV 25') === -1);
+  assert.ok(rzHTML.indexOf('Play under review') === -1);
+  assert.ok(rzHTML.indexOf('data-redzone-filter') !== -1);
+
+  // The red zone filter buttons are wired through the delegated handler.
+  elements['game-content'].dispatch('click', {
+    target: {
+      closest: function (selector) {
+        if (selector !== '.booth-filter') return null;
+        return {
+          getAttribute: function (attr) {
+            return attr === 'data-redzone-filter' ? 'penalty' : null;
+          }
+        };
+      }
+    }
+  });
+  assert.ok(elements['game-content'].innerHTML.indexOf(
+    'class="booth-filter active" data-redzone-filter="penalty"') !== -1);
+
   console.log('NFL scoreboard app smoke test');
   console.log('  ✓ live details use the 1-second timer');
   console.log('  ✓ overlapping detail requests are deduplicated');
@@ -306,6 +366,8 @@ async function run() {
   console.log('  ✓ idle final-game ticks do not rebuild an unchanged booth feed');
   console.log('  ✓ live review content renders from the supplied API-shaped payload');
   console.log('  ✓ the booth sound button toggles and plays the alert buzz');
+  console.log('  ✓ red-zone booth events carry the RZ badge in the all-games feed');
+  console.log('  ✓ the Red Zone tab shows only red-zone flags/reviews, with working filters');
 }
 
 run().catch(function (err) {
