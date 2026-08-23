@@ -42,9 +42,10 @@ ok('exports the documented 15-second score and 1-second review cadences', functi
   assert.strictEqual(NFLRefresh.LIVE_REVIEWS_INTERVAL_MS, 1000);
 });
 
-ok('renders booth responses immediately while limiting non-review DOM paints to 5 seconds', function () {
+ok('renders booth and red zone responses immediately while limiting non-review DOM paints to 5 seconds', function () {
   assert.strictEqual(NFLRefresh.NON_REVIEW_RENDER_INTERVAL_MS, 5000);
   assert.strictEqual(NFLRefresh.shouldRenderGameContent('booth', 10000, 10001), true);
+  assert.strictEqual(NFLRefresh.shouldRenderGameContent('redzone', 10000, 10001), true);
   assert.strictEqual(NFLRefresh.shouldRenderGameContent('plays', 10000, 14999), false);
   assert.strictEqual(NFLRefresh.shouldRenderGameContent('players', 10000, 15000), true);
   assert.strictEqual(NFLRefresh.shouldRenderGameContent('team', 0, 10000), true);

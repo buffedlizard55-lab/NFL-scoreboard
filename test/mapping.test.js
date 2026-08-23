@@ -93,10 +93,10 @@ ok('playerStatTeams: rushing category', function () {
 // 4. Drives / play-by-play ---------------------------------------------
 ok('playsList: flatten + sort drives in chronological order', function () {
   const plays = NFLMap.playsList(sample.summary.drives);
-  assert.strictEqual(plays.length, 10);
+  assert.strictEqual(plays.length, 11);
   assert.strictEqual(plays[0].type.text, 'Kickoff');
   assert.strictEqual(plays[0].sequenceNumber, '3900');
-  assert.strictEqual(plays[9].sequenceNumber, '355600');
+  assert.strictEqual(plays[10].sequenceNumber, '355600');
 });
 
 ok('playRow: down/distance, scores, clock', function () {
@@ -199,9 +199,9 @@ ok('boothEvent: replay reversed, challenge upheld, under review pending', functi
 
 ok('boothEvents: only flagged plays, chronological, lastPlay de-duped', function () {
   const events = NFLMap.boothEvents(sample.summary.drives);
-  assert.strictEqual(events.length, 5);
+  assert.strictEqual(events.length, 6);
   assert.deepStrictEqual(events.map(function (e) { return e.kind; }),
-    ['penalty', 'penalty', 'replay', 'challenge', 'review']);
+    ['penalty', 'penalty', 'replay', 'challenge', 'review', 'penalty']);
 
   const last = {
     id: '4018732869005',
@@ -210,7 +210,7 @@ ok('boothEvents: only flagged plays, chronological, lastPlay de-duped', function
     isPenalty: false
   };
   const withLive = NFLMap.boothEvents(sample.summary.drives, last);
-  assert.strictEqual(withLive.length, 5);
+  assert.strictEqual(withLive.length, 6);
 
   const resolvedLast = {
     id: '4018732869005',
@@ -220,7 +220,7 @@ ok('boothEvents: only flagged plays, chronological, lastPlay de-duped', function
     isPenalty: false
   };
   const withResolution = NFLMap.boothEvents(sample.summary.drives, resolvedLast);
-  assert.strictEqual(withResolution.length, 5);
+  assert.strictEqual(withResolution.length, 6);
   assert.strictEqual(withResolution[4].kind, 'replay');
   assert.strictEqual(withResolution[4].result, 'overturned');
   assert.strictEqual(withResolution[4].text, resolvedLast.text);
@@ -232,9 +232,9 @@ ok('boothEvents: only flagged plays, chronological, lastPlay de-duped', function
     isPenalty: false
   };
   const extra = NFLMap.boothEvents(sample.summary.drives, other);
-  assert.strictEqual(extra.length, 6);
-  assert.strictEqual(extra[5].live, true);
-  assert.strictEqual(extra[5].kind, 'review');
+  assert.strictEqual(extra.length, 7);
+  assert.strictEqual(extra[6].live, true);
+  assert.strictEqual(extra[6].kind, 'review');
 });
 
 ok('boothResult: confirmed / stands / offsetting phrases', function () {
@@ -440,6 +440,127 @@ ok('boothScoreEffect / boothEventContext: null and out-of-range safety', functio
   assert.deepStrictEqual(empty.before, { away: 0, home: 0 });
   assert.strictEqual(NFLMap.boothEventContext(null, null, 0), null);
   assert.strictEqual(NFLMap.boothEventContext({ id: 'x' }, [], -1).removesPoints, false);
+});
+
+// 8b. Red zone location (verified against real play fields) ----------------
+ok('isRedZonePlay: primary signal is start.yardsToEndzone (distance to driven end zone)', function () {
+  // Real play shapes from event 401873286: "1st & 10 at HOU 19" (LV offense)
+  // carries yardsToEndzone 19; "1st & 10 at LV 19" (LV on its OWN 19, driving
+  // the other way) carries 81.
+  assert.strictEqual(NFLMap.isRedZonePlay({
+    start: { yardsToEndzone: 19, downDistanceText: '1st & 10 at HOU 19', possessionText: 'HOU 19' }
+  }), true);
+  assert.strictEqual(NFLMap.yardsToEndzone({
+    start: { yardsToEndzone: 19, downDistanceText: '1st & 10 at HOU 19', possessionText: 'HOU 19' }
+  }), 19);
+  assert.strictEqual(NFLMap.isRedZonePlay({
+    start: { yardsToEndzone: 81, downDistanceText: '1st & 10 at LV 19', possessionText: 'LV 19' }
+  }), false);
+  assert.strictEqual(NFLMap.isRedZonePlay({
+    start: { yardsToEndzone: 64, downDistanceText: '1st & 10 at LV 36', possessionText: 'LV 36' }
+  }), false);
+  // The red zone is the opponent's 20 or inside: exactly 20 counts, 21 does not.
+  assert.strictEqual(NFLMap.isRedZonePlay({ start: { yardsToEndzone: 20 } }), true);
+  assert.strictEqual(NFLMap.isRedZonePlay({ start: { yardsToEndzone: 21 } }), false);
+});
+
+ok('isRedZonePlay: 0 is a sentinel (timeouts / end-of-period), not "at the end zone"', function () {
+  // Real official-timeout play: yardsToEndzone 0 but downDistanceText says "Goal".
+  assert.strictEqual(NFLMap.isRedZonePlay({
+    start: { yardsToEndzone: 0, downDistanceText: ' & Goal at HOU 15', possessionText: 'HOU 15' }
+  }), true);
+  // Real two-minute-warning play: yardsToEndzone 0, plain "at HOU 47" wording,
+  // HOU on offense -> 53 yards to go, not the red zone.
+  const hou = { team: { abbreviation: 'HOU' } };
+  assert.strictEqual(NFLMap.isRedZonePlay({
+    start: { yardsToEndzone: 0, downDistanceText: '1st & 10 at HOU 47', possessionText: 'HOU 47' }
+  }, hou), false);
+});
+
+ok('isRedZonePlay: "Goal" wording is a fallback when yardsToEndzone is absent', function () {
+  assert.strictEqual(NFLMap.yardsToEndzone({
+    start: { downDistanceText: '1st & Goal at HOU 4', possessionText: 'HOU 4' }
+  }), NFLMap.RED_ZONE_DISTANCE);
+  assert.strictEqual(NFLMap.isRedZonePlay({
+    start: { downDistanceText: ' & Goal at HOU 15', possessionText: 'HOU 15' }
+  }), true);
+  // Plain wording is not treated as goal-to-go.
+  assert.strictEqual(NFLMap.isRedZonePlay({
+    start: { downDistanceText: '1st & 10 at HOU 40', possessionText: 'HOU 40' }
+  }, { team: { abbreviation: 'LV' } }), false);
+});
+
+ok('isRedZonePlay: possessionText fallback resolves which way the offense is driving', function () {
+  // possessionText names the nearer goal line. LV offense at "HOU 19" drives
+  // TOWARD the HOU line (19 yds); LV offense at "LV 19" drives AWAY (81 yds);
+  // HOU offense at "LV 41" drives TOWARD the LV line (41 yds). All three
+  // match the yardsToEndzone values ESPN reported for the same real spots.
+  const lv = { team: { abbreviation: 'LV' } };
+  const hou = { team: { abbreviation: 'HOU' } };
+  assert.strictEqual(NFLMap.yardsToEndzone({
+    start: { downDistanceText: '1st & 10 at HOU 19', possessionText: 'HOU 19' }
+  }, lv), 19);
+  assert.strictEqual(NFLMap.yardsToEndzone({
+    start: { downDistanceText: '1st & 10 at LV 19', possessionText: 'LV 19' }
+  }, lv), 81);
+  assert.strictEqual(NFLMap.yardsToEndzone({
+    start: { downDistanceText: '1st & 10 at LV 41', possessionText: 'LV 41' }
+  }, hou), 41);
+  assert.strictEqual(NFLMap.isRedZonePlay({
+    start: { downDistanceText: '1st & 10 at HOU 19', possessionText: 'HOU 19' }
+  }, lv), true);
+  assert.strictEqual(NFLMap.isRedZonePlay({
+    start: { downDistanceText: '1st & 10 at LV 19', possessionText: 'LV 19' }
+  }, lv), false);
+});
+
+ok('isRedZonePlay: never guesses when no field establishes the distance', function () {
+  assert.strictEqual(NFLMap.yardsToEndzone({ start: { downDistanceText: '1st & 10 at HOU 19', possessionText: 'HOU 19' } }), null);
+  assert.strictEqual(NFLMap.isRedZonePlay({ start: { downDistanceText: '1st & 10 at HOU 19', possessionText: 'HOU 19' } }), false);
+  assert.strictEqual(NFLMap.isRedZonePlay({ start: {} }), false);
+  assert.strictEqual(NFLMap.isRedZonePlay(null), false);
+  assert.strictEqual(NFLMap.yardsToEndzone(null), null);
+});
+
+ok('boothEvent: carries verified red zone membership; fixture has exactly one red zone event', function () {
+  const events = NFLMap.boothEvents(sample.summary.drives);
+  const rz = events.filter(function (e) { return e.redZone; });
+  assert.strictEqual(rz.length, 1);
+  assert.strictEqual(rz[0].id, '4018732869007');
+  assert.strictEqual(rz[0].kind, 'penalty');
+  assert.strictEqual(rz[0].yardsToEndzone, 19);
+  assert.strictEqual(rz[0].downDistance, '1st & 10 at HOU 19');
+
+  // The other five fixture events sit outside the red zone.
+  const others = events.filter(function (e) { return !e.redZone; });
+  assert.strictEqual(others.length, 5);
+  assert.deepStrictEqual(others.map(function (e) { return e.yardsToEndzone; }),
+    [75, 80, 34, 34, 40]);
+});
+
+ok('boothEvents: a live last play without position data is not marked red zone', function () {
+  const last = {
+    id: 'live-rz',
+    text: 'PENALTY on LV-X, False Start, 5 yards, enforced at HST 10 - No Play.',
+    type: { text: 'Penalty' },
+    isPenalty: true,
+    penalty: { yards: 5, type: { text: 'False Start' } }
+  };
+  const events = NFLMap.boothEvents(sample.summary.drives, last);
+  const liveEv = events.filter(function (e) { return e.live; })[0];
+  assert.ok(liveEv);
+  assert.strictEqual(liveEv.redZone, false);
+  assert.strictEqual(liveEv.yardsToEndzone, null);
+});
+
+ok('dayBoothFeed: red zone membership survives the merge', function () {
+  const eventsA = NFLMap.boothEvents(sample.summary.drives);
+  const feed = NFLMap.dayBoothFeed([
+    { id: '401873286', shortName: 'LV @ HOU', events: eventsA }
+  ]);
+  const rz = feed.filter(function (e) { return e.redZone; });
+  assert.strictEqual(rz.length, 1);
+  assert.strictEqual(rz[0].id, '4018732869007');
 });
 
 // 9. Day-wide booth feed (all games of a day, chat-style merge) ----------

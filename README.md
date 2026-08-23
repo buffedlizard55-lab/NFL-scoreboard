@@ -57,7 +57,7 @@ the repository root — no build step:
   so you can test the sound. The preference is remembered in the browser.
 - **Game view** (click any game) — team header with scores, records, a Q1–Q4 + T
   line-score table, venue, broadcast, and attendance, plus a prev/next game
-  switcher and five tabs:
+  switcher and six tabs:
   - **Play-by-Play** — every play of every drive (down & distance, clock, play
     description, yardage, running score), highlighted for scoring plays,
     turnovers, and penalties.
@@ -69,6 +69,14 @@ the repository root — no build step:
     during → after** the flag/review/challenge, flags events that **removed
     points** (e.g. a 5-yard TD erased by an offensive penalty or a TD
     reversed by replay), and names the scoring play that was nullified.
+  - **Red Zone** — the same booth log filtered to the red zone: only the
+    flags, challenges, replay reviews, and under-review plays on downs that
+    **started in the opponent's 20-yard line or inside**. Red-zone entries
+    carry a small red **RZ** badge in the Flags & Reviews tab and in the
+    all-games live booth chat, so red-zone trouble is visible without
+    switching tabs. Like the booth log, it repaints on every 1-second
+    response while the game is live and can be filtered by kind
+    (All / Flags / Challenges / Replay / Under review).
   - **Scoring Drives** — each scoring drive with team, result, plays / yards /
     time, and the score after the play (NFL.com's "Scoring Drives" style).
   - **Team Stats** — full team box score comparison (first downs, total yards,
@@ -135,12 +143,16 @@ npm test
 This validates score/team/linescore extraction, team stats, player stat
 categories (passing, rushing, …), play-by-play flattening & ordering, scoring
 drives, quarter labels, booth classification (flags / challenges / replay /
-under review), booth before/during/after score tracking and called-back-score
+under review), red-zone location detection (the verified `yardsToEndzone` /
+"Goal" / possession-line rules, the `0`-sentinel guard, and the no-guessing
+fallback), booth before/during/after score tracking and called-back-score
 detection, day-wide feed merging / attribution / dedupe, in-place review
-result updates, null-safety, the 15-second/1-second polling cadences, visibility
-gating, immediate refresh, timer cleanup, browser-app wiring, request dedupe,
-the booth sound button (renders, toggles, and triggers the alert buzz), and
-rendering against an injected API-shaped payload.
+result updates, null-safety, the 15-second/1-second polling cadences,
+immediate repaint of both the booth and red zone tabs, visibility gating,
+immediate refresh, timer cleanup, browser-app wiring, request dedupe, the
+booth sound button (renders, toggles, and triggers the alert buzz), and
+rendering against an injected API-shaped payload — including opening a game
+and verifying the Red Zone tab shows only red-zone booth events.
 
 The booth feed does **not** call or invent a separate reviews endpoint. It
 classifies the play records returned by the summary endpoint using fields
@@ -151,6 +163,27 @@ The before/during/after score tracking and `points removed` badge also use
 only the per-play running scores already returned by ESPN
 (`awayScore` / `homeScore`); an event is reported as removing points only when
 that running score actually drops, so the app does not invent corrections.
+
+Red zone membership is likewise computed only from position fields present on
+the play records. Verified against real summary responses (Raiders @ Texans,
+2026 preseason, event `401873286`):
+
+- `start.yardsToEndzone` is the distance from the play spot to the end zone
+  the offense is driving toward — the only side-independent distance on a
+  play. It is treated as authoritative when it is a positive number; ESPN
+  sends `0` for non-snap entries (timeouts, two-minute warning,
+  end-of-period plays), so `0` means "not provided", never "at the end zone".
+- `start.downDistanceText` switching to "Goal" ("1st & Goal at HOU 4") marks
+  goal-to-go but does not happen consistently ("1st & 10 at HOU 19" stays
+  plain), so it is only a fallback.
+- As a last resort, `start.possessionText` ("HOU 19" names the nearer goal
+  line) is combined with the drive's offense to compute the distance — but
+  only when no numeric field is available.
+
+`start.yardLine` is deliberately not used: it is measured from the home
+team's goal line (0–100), so its meaning flips with each game's home/away
+pairing. When no field can establish the distance, a play is **not** treated
+as a red zone play — the app never guesses.
 
 ## Notes & limits
 

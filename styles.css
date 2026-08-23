@@ -180,6 +180,7 @@ main {
 .badge.penalty { background: #fff4d6; color: #92400e; }
 .badge.challenge { background: #e7eefe; color: #1e40af; }
 .badge.replay { background: #f3e8ff; color: #6b21a8; }
+.badge.rz { background: #fee2e2; color: #991b1b; }
 .badge.result { background: #eef1f5; color: var(--ink-2); }
 .badge.result.pending { background: #ffe3ea; color: var(--live); }
 .badge.result.overturned { background: #fff4d6; color: #92400e; }

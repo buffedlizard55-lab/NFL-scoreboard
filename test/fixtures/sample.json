@@ -324,7 +324,7 @@
         },
         {
           "id": "40187328699",
-          "description": "6 plays, fixture flags & reviews",
+          "description": "7 plays, fixture flags & reviews",
           "team": {
             "id": "13",
             "name": "Raiders",
@@ -337,7 +337,7 @@
           "timeElapsed": { "displayValue": "2:00" },
           "yards": 0,
           "isScore": false,
-          "offensivePlays": 6,
+          "offensivePlays": 7,
           "result": "PUNT",
           "shortDisplayResult": "PUNT",
           "displayResult": "Punt",
@@ -438,6 +438,23 @@
               "end": { "down": 3, "distance": 6, "yardLine": 42, "downDistanceText": "3rd & 6 at HOU 42", "possessionText": "HOU 42" },
               "isPenalty": false,
               "isTurnover": false
+            },
+            {
+              "id": "4018732869007",
+              "sequenceNumber": "8600",
+              "type": { "id": "8", "text": "Penalty", "abbreviation": "PEN" },
+              "text": "PENALTY on LV-K.Miller, False Start, 5 yards, enforced at HST 19 - No Play.",
+              "awayScore": 0,
+              "homeScore": 7,
+              "period": { "number": 2 },
+              "clock": { "displayValue": "8:51" },
+              "scoringPlay": false,
+              "statYardage": -5,
+              "start": { "down": 1, "distance": 10, "yardLine": 19, "yardsToEndzone": 19, "downDistanceText": "1st & 10 at HOU 19", "possessionText": "HOU 19", "team": { "id": "13" } },
+              "end": { "down": 1, "distance": 15, "yardLine": 14, "yardsToEndzone": 14, "downDistanceText": "1st & 15 at HOU 14", "possessionText": "HOU 14", "team": { "id": "13" } },
+              "isPenalty": true,
+              "isTurnover": false,
+              "penalty": { "yards": 5, "type": { "slug": "false-start", "text": "False Start" }, "status": { "slug": "accepted", "text": "Accepted" } }
             }
           ]
         }

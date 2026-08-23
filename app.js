@@ -17,6 +17,7 @@
     { id: 'plays', label: 'Play-by-Play' },
     { id: 'drives', label: 'Scoring Drives' },
     { id: 'booth', label: 'Flags & Reviews' },
+    { id: 'redzone', label: 'Red Zone' },
     { id: 'team', label: 'Team Stats' },
     { id: 'players', label: 'Player Stats' }
   ];
@@ -83,8 +84,9 @@
     eventIndex: -1,        // open game within state.events
     summary: null,         // raw summary JSON for the open game
     activeTab: 'plays',
-    lastGameContentRenderAt: 0, // preserve the old 5s cadence outside the booth tab
+    lastGameContentRenderAt: 0, // preserve the old 5s cadence outside the booth/redzone tabs
     boothFilter: 'all',    // all | penalty | challenge | replay | review
+    redZoneFilter: 'all',  // same kinds, for the Red Zone tab
     seenBoothIds: {},      // play ids already shown in the booth feed
     boothPrimed: false,    // first paint of a game's booth marks history as seen
     daySummaries: {},      // eventId -> { drives, situation, final }
@@ -270,7 +272,9 @@
         updateLiveIndicator();
         if (state.eventIndex >= 0) {
           renderGameHeader();
-          if (state.activeTab === 'booth' && state.summary) renderTabContent();
+          if ((state.activeTab === 'booth' || state.activeTab === 'redzone') && state.summary) {
+            renderTabContent();
+          }
         }
       })
       .catch(function () { /* keep last good data on transient failure */ });
@@ -816,9 +820,13 @@
       ? '<span class="booth-dd">' + esc(e.downDistance) + '</span>'
       : '';
     const liveTag = liveNow ? '<span class="badge live">LIVE</span>' : '';
+    const rz = e.redZone
+      ? '<span class="badge rz" title="Play started in the red zone (opponent&rsquo;s 20 or inside)">RZ</span>'
+      : '';
     const state = boothScoreTrailHTML(e, e.awayAbbr, e.homeAbbr);
     const aria = esc(e.shortName) + ', ' + esc(kind) + ': ' + esc(e.text) +
       (e.removesPoints ? ', removed ' + esc(e.pointsRemoved) + ' points' : '') +
+      (e.redZone ? ', in the red zone' : '') +
       '. Open this game.';
     return '' +
       '<button type="button" class="booth-msg day-msg ' + esc(e.kind) +
@@ -827,6 +835,7 @@
           '<span class="day-game">' + esc(e.shortName) + '</span>' +
           liveTag +
           '<span class="badge ' + esc(e.kind) + '">' + esc(kind) + '</span>' +
+          rz +
           (result ? '<span class="badge result ' + esc(e.result) + '">' + esc(result) + '</span>' : '') +
           '<span class="booth-when">' + esc(when) + '</span>' +
           (score ? '<span class="booth-score">' + score + '</span>' : '') +
@@ -849,6 +858,7 @@
     state.activeTab = tab || 'plays';
     state.lastGameContentRenderAt = 0;
     state.boothFilter = 'all';
+    state.redZoneFilter = 'all';
     state.seenBoothIds = {};
     state.boothPrimed = false;
     showGameView();
@@ -968,6 +978,7 @@
     if (state.activeTab === 'plays') el.innerHTML = playsHTML();
     else if (state.activeTab === 'drives') el.innerHTML = drivesHTML();
     else if (state.activeTab === 'booth') renderBooth(el);
+    else if (state.activeTab === 'redzone') renderRedZone(el);
     else if (state.activeTab === 'team') el.innerHTML = teamStatsHTML();
     else if (state.activeTab === 'players') el.innerHTML = playerStatsHTML();
   }
@@ -1062,11 +1073,12 @@
       '</div>';
     }
 
+    // Literal arrows (not &rarr; entities): foot passes through esc() below.
     const live = current() && current().status && current().status.state === 'in';
     const foot = live
-      ? 'Live booth log · pulled from ESPN play-by-play · tracks score before &rarr; during &rarr; after when points are removed · ' +
+      ? 'Live booth log · pulled from ESPN play-by-play · tracks score before → during → after when points are removed · ' +
         LIVE_REVIEW_SECONDS + 's polling schedule'
-      : 'Booth log · pulled from ESPN play-by-play · tracks score before &rarr; during &rarr; after when points are removed';
+      : 'Booth log · pulled from ESPN play-by-play · tracks score before → during → after when points are removed';
 
     return '<div class="booth">' +
       '<div class="booth-head">' +
@@ -1104,12 +1116,16 @@
     const awayAbbr = game && game.away ? game.away.abbr : '';
     const homeAbbr = game && game.home ? game.home.abbr : '';
     const state = boothScoreTrailHTML(e, awayAbbr, homeAbbr);
+    const rz = e.redZone
+      ? '<span class="badge rz" title="Play started in the red zone (opponent&rsquo;s 20 or inside)">RZ</span>'
+      : '';
     return '' +
       '<article class="booth-msg ' + esc(e.kind) + (isNew ? ' new' : '') + '">' +
         '<div class="booth-msg-top">' +
           '<span class="booth-when">' + esc(when) + '</span>' +
           liveTag +
           '<span class="badge ' + esc(e.kind) + '">' + esc(kind) + '</span>' +
+          rz +
           (result ? '<span class="badge result ' + esc(e.result) + '">' + esc(result) + '</span>' : '') +
           '<span class="booth-score">' + score + '</span>' +
         '</div>' +
@@ -1119,6 +1135,86 @@
         '<p class="booth-text">' + esc(e.text) + '</p>' +
         state +
       '</article>';
+  }
+
+  /* ------------------------------- red zone ------------------------------ */
+  /*
+   * The Red Zone tab: the same booth feed (flags, challenges, replay reviews
+   * and under-review plays) filtered to events whose play STARTED in the
+   * red zone — the opponent's 20-yard line or inside. Red zone membership
+   * comes from NFLMap.boothEvent(...).redZone, which is computed only from
+   * the verified play position fields (see lib/mapping.js); an event whose
+   * distance could not be established is never shown here.
+   */
+
+  function renderRedZone(el) {
+    const events = NFLMap.boothEvents(
+      state.summary && state.summary.drives,
+      liveLastPlay()
+    ).filter(function (e) { return e.redZone; });
+    const feed = el.querySelector('.booth-feed');
+    const prevScroll = feed ? feed.scrollTop : 0;
+    const nearBottom = !feed ||
+      (feed.scrollHeight - feed.scrollTop - feed.clientHeight < 56);
+
+    el.innerHTML = redZoneHTML(events);
+
+    const feed2 = el.querySelector('.booth-feed');
+    if (feed2) {
+      if (nearBottom) feed2.scrollTop = feed2.scrollHeight;
+      else feed2.scrollTop = prevScroll;
+    }
+  }
+
+  function redZoneHTML(events) {
+    const filter = state.redZoneFilter || 'all';
+    const counts = { all: events.length, penalty: 0, challenge: 0, replay: 0, review: 0 };
+    events.forEach(function (e) {
+      if (counts[e.kind] != null) counts[e.kind] += 1;
+    });
+    const visible = events.filter(function (e) {
+      return filter === 'all' || e.kind === filter;
+    });
+
+    const filters = [
+      ['all', 'All'],
+      ['penalty', 'Flags'],
+      ['challenge', 'Challenges'],
+      ['replay', 'Replay'],
+      ['review', 'Under review']
+    ].map(function (pair) {
+      const id = pair[0], label = pair[1];
+      const n = counts[id];
+      const extra = id === 'all' ? '' : ' · ' + n;
+      return '<button type="button" class="booth-filter' + (filter === id ? ' active' : '') +
+        '" data-redzone-filter="' + id + '"' +
+        (n === 0 && id !== 'all' ? ' disabled' : '') + '>' +
+        esc(label) + extra + '</button>';
+    }).join('');
+
+    let body;
+    if (!visible.length) {
+      body = '<div class="empty booth-empty">No flags, challenges, or replay reviews in the red zone yet.</div>';
+    } else {
+      body = '<div class="booth-feed" role="log" aria-live="polite" aria-relevant="additions">' +
+        visible.map(function (e) { return boothMsgHTML(e, false); }).join('') +
+      '</div>';
+    }
+
+    const live = current() && current().status && current().status.state === 'in';
+    // Literal arrow: foot passes through esc() below.
+    const foot = 'Flags, challenges & replay reviews on plays that started in the ' +
+      'opponent’s 20 or inside · pulled from ESPN play-by-play' +
+      (live ? ' · updated every ' + LIVE_REVIEW_SECONDS + 's while live' : '');
+
+    return '<div class="booth">' +
+      '<div class="booth-head">' +
+        '<div class="booth-title">Red zone flags, challenges &amp; replay reviews</div>' +
+        '<div class="booth-sub">' + esc(foot) + '</div>' +
+      '</div>' +
+      '<div class="booth-filters">' + filters + '</div>' +
+      body +
+    '</div>';
   }
 
   /* ------------------------------- play by play -------------------------- */
@@ -1297,6 +1393,7 @@
     state.summary = null;
     state.lastGameContentRenderAt = 0;
     state.boothFilter = 'all';
+    state.redZoneFilter = 'all';
     state.seenBoothIds = {};
     state.boothPrimed = false;
     state.daySummaries = {};
@@ -1385,6 +1482,24 @@
       tabs.forEach(function (t) { t.classList.toggle('active', t === btn); });
       renderTabContent();
       state.lastGameContentRenderAt = Date.now();
+    });
+
+    // The Flags & Reviews and Red Zone filter buttons live inside
+    // #game-content, which is rebuilt on every refresh, so they use one
+    // delegated listener on that container.
+    $('game-content').addEventListener('click', function (e) {
+      const btn = e.target.closest('.booth-filter');
+      if (!btn) return;
+      const el = $('game-content');
+      const booth = btn.getAttribute('data-booth-filter');
+      const redzone = btn.getAttribute('data-redzone-filter');
+      if (booth) {
+        state.boothFilter = booth;
+        renderBooth(el);
+      } else if (redzone) {
+        state.redZoneFilter = redzone;
+        renderRedZone(el);
+      }
     });
 
     // Escape returns from the game view to the scoreboard.
