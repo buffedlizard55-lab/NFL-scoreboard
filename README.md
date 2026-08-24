@@ -196,8 +196,14 @@ present in those records (`isPenalty`, `penalty.yards`, `penalty.type.text`,
 "The replay official reviewed…", "challenged the…", and "Play under review."
 The before/during/after score tracking and `points removed` badge also use
 only the per-play running scores already returned by ESPN
-(`awayScore` / `homeScore`); an event is reported as removing points only when
-that running score actually drops, so the app does not invent corrections.
+(`awayScore` / `homeScore`). A decrease is accepted as a removal only when the
+booth event can be the ruling that caused it: a scoring/nullification play, a
+review/challenge/replay, or a standalone penalty correction immediately tied
+to the scoring play. This causal check also prevents a stale or malformed
+lower per-play score on the ensuing kickoff from being mistaken for an
+officials' ruling. A routine
+kickoff, punt, or return foul cannot erase the preceding score and is never
+promoted to a nullification from that feed glitch.
 
 The `NULLIFIED` badge covers the cases where the score is already off the
 board but ESPN's running total has not moved (or never will, because the

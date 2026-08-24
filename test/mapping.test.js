@@ -607,6 +607,59 @@ ok('boothEventContext: a flag on the ensuing kickoff is not a nullification', fu
   assert.strictEqual(event.removesPoints, false);
 });
 
+ok('boothEventContext: SEA-TEN kickoff holding cannot nullify the preceding 7 points', function () {
+  // Exact play ordering and relevant API fields from ESPN event 401873297,
+  // SEA @ TEN on 2026-08-23. The published snapshot had 7-0 on every entry.
+  // The test deliberately supplies 0-0 on the kickoff as a defensive
+  // malformed-live-data case; that lower value must not be treated as an
+  // officials' score ruling.
+  const plays = [
+    { id: '401873297252', sequenceNumber: '25200',
+      type: { id: '67', text: 'Passing Touchdown' },
+      text: '(Shotgun) D.Lock pass deep left to E.Arroyo for 36 yards, TOUCHDOWN. ' +
+        'J.Myers extra point is GOOD, Center-C.Stoll, Holder-M.Dickson.',
+      awayScore: 7, homeScore: 0, scoringPlay: true, isPenalty: false },
+    { id: '401873297286', sequenceNumber: '28600',
+      type: { id: '74', text: 'Official Timeout' },
+      text: 'Official Timeout at 11:12.', awayScore: 7, homeScore: 0,
+      scoringPlay: false, isPenalty: false },
+    { id: '401873297293', sequenceNumber: '29300',
+      type: { id: '53', text: 'Kickoff' },
+      text: 'J.Myers kicks 67 yards from SEA 35 to TEN -2. M.Carter pushed ob at ' +
+        'TEN 20 for 22 yards (M.Foster).PENALTY on TEN-X.Restrepo, Offensive ' +
+        'Holding, 10 yards, enforced at TEN 20.',
+      // Deliberately model a malformed lower live score.
+      awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: true,
+      penalty: { yards: 10, type: { text: 'Offensive Holding' },
+        status: { text: 'Accepted' } } },
+    { id: '401873297339', sequenceNumber: '33900', type: { text: 'Rush' },
+      text: 'T.Pollard up the middle to TEN 19 for 9 yards (C.Surratt).',
+      awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: false }
+  ];
+  const event = NFLMap.boothEventContext(NFLMap.boothEvent(plays[2]), plays, 2);
+  assert.strictEqual(event.kind, 'penalty');
+  assert.strictEqual(event.removesPoints, false);
+  assert.strictEqual(event.pointsRemoved, 0);
+  assert.strictEqual(event.nullified, false);
+  assert.deepStrictEqual(
+    [event.beforeAwayScore, event.duringAwayScore, event.afterAwayScore],
+    [7, 7, 7],
+    'an unrelated kickoff flag carries forward the last valid score'
+  );
+});
+
+ok('boothEventContext: a kickoff-return TD explicitly nullified by penalty is still caught', function () {
+  const play = {
+    id: 'kr1', sequenceNumber: '100', type: { text: 'Kickoff' },
+    text: 'A.Returner for 98 yards, TOUCHDOWN NULLIFIED by Penalty.PENALTY on ' +
+      'TEN-X, Holding, 10 yards, enforced at TEN 20 - No Play.',
+    awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: true
+  };
+  const event = NFLMap.boothEventContext(NFLMap.boothEvent(play), [play], 0);
+  assert.strictEqual(event.removesPoints, false);
+  assert.strictEqual(event.nullified, true, 'explicit officials wording remains authoritative');
+});
+
 ok('boothEventContext: a published score drop is reported even without nullified wording', function () {
   const plays = [
     { id: 'f1', sequenceNumber: '100', type: { text: 'Field Goal' },
