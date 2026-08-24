@@ -59,10 +59,10 @@ the repository root — no build step:
   reversal), including the scoring play that was wiped out. The booth header
   has a **sound toggle button** (🔔 Sound On / 🔇 Sound Off) like the MLB
   replay feed: it is ON by default, and each click plays the exact same
-  3-second alert buzz so you can test the sound. The alert fires **only for
-  nullified scores** — flags, challenges, replay reviews and under-review
-  plays that take nothing off the board stay silent. The preference is
-  remembered in the browser.
+  gentle 3-second rain alert sound so you can test it. The alert fires
+  **only for nullified scores** — flags, challenges, replay reviews and
+  under-review plays that take nothing off the board stay silent. The
+  preference is remembered in the browser.
 - **Game view** (click any game) — team header with scores, records, a Q1–Q4 + T
   line-score table, venue, broadcast, and attendance, plus a prev/next game
   switcher and six tabs:
@@ -178,16 +178,16 @@ null-safety, the 15-second/1-second polling cadences, immediate repaint of
 both the booth and red zone tabs plus the persistent nullified top banners and
 play-by-play highlighting, visibility gating, immediate refresh, timer
 cleanup, browser-app wiring, request dedupe, the booth sound button (renders,
-toggles, and triggers the alert buzz), and rendering against an injected
+toggles, and triggers the rain alert sound), and rendering against an injected
 API-shaped payload — including opening a game and verifying the Red Zone tab
 shows only nullified red-zone scores, checking the all-games booth's Red zone
 filter chip (its count, that it cuts the day feed to nullified red-zone
 scores only, that it counts and keeps them from **each** game of a two-game
 day, and that clicking a message while it is active opens that game's Red
 Zone tab), that a touchdown wiped by an accepted foul is badged NULLIFIED in
-the feed and on its game card, and that **only** nullified scores buzz — a
-plain penalty leaves the alert silent while a replay reversal that takes
-points off fires it.
+the feed and on its game card, and that **only** nullified scores play the
+alert — a plain penalty leaves the alert silent while a replay reversal that
+takes points off fires it.
 
 The booth feed does **not** call or invent a separate reviews endpoint. It
 classifies the play records returned by the summary endpoint using fields

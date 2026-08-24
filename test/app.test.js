@@ -242,8 +242,10 @@ async function run() {
   });
 
   // Minimal Web Audio stand-in so the smoke test can verify the booth sound
-  // button reaches the same buzz code path the alert system uses.
-  const audio = { oscillatorCount: 0 };
+  // button reaches the same rain-alert code path the alert system uses. The
+  // alert plays a noise-buffer "rain bed" plus sine-oscillator "droplets",
+  // so both node types are counted.
+  const audio = { oscillatorCount: 0, noiseSourceCount: 0 };
   function fakeOscillator() {
     audio.oscillatorCount += 1;
     return {
@@ -266,15 +268,41 @@ async function run() {
       connect: function () {}
     };
   }
+  function fakeBufferSource() {
+    audio.noiseSourceCount += 1;
+    return {
+      buffer: null,
+      connect: function () {},
+      start: function () {},
+      stop: function () {}
+    };
+  }
+  function fakeBiquadFilter() {
+    return {
+      type: '',
+      frequency: {
+        setValueAtTime: function () {},
+        linearRampToValueAtTime: function () {}
+      },
+      connect: function () {}
+    };
+  }
   class FakeAudioContext {
     constructor() {
       this.state = 'running';
       this.currentTime = 0;
+      this.sampleRate = 44100;
       this.destination = {};
     }
     resume() { return Promise.resolve(); }
     createOscillator() { return fakeOscillator(); }
     createGain() { return fakeGain(); }
+    createBuffer(channels, frameCount) {
+      const data = new Float32Array(frameCount);
+      return { getChannelData: function () { return data; } };
+    }
+    createBufferSource() { return fakeBufferSource(); }
+    createBiquadFilter() { return fakeBiquadFilter(); }
   }
 
   function response(json) {
@@ -427,7 +455,7 @@ async function run() {
   assert.ok(fetchOptions.every(function (options) { return options && options.cache === 'no-store'; }));
 
   // Booth sound button: renders in the all-games booth, defaults ON, and
-  // clicking it toggles the label and plays the same alert buzz.
+  // clicking it toggles the label and plays the same rain alert sound.
   function clickSoundButton() {
     elements['day-booth'].dispatch('click', {
       target: {
@@ -440,18 +468,20 @@ async function run() {
   assert.ok(elements['day-booth'].innerHTML.indexOf('day-sound-btn') !== -1);
   assert.ok(elements['day-booth'].innerHTML.indexOf('&#128276; Sound On') !== -1);
   assert.strictEqual(audio.oscillatorCount, 0, 'no audio before the sound button is used');
+  assert.strictEqual(audio.noiseSourceCount, 0, 'no rain bed before the sound button is used');
   clickSoundButton();
   await flush();
   assert.strictEqual(elements['day-booth'].innerHTML.indexOf('&#128263; Sound Off') !== -1, true);
-  assert.ok(audio.oscillatorCount > 0, 'clicking the sound button plays the alert buzz');
+  assert.ok(audio.oscillatorCount > 0, 'clicking the sound button plays the rain alert droplets');
+  assert.ok(audio.noiseSourceCount > 0, 'clicking the sound button plays the rain alert noise bed');
   clickSoundButton();
   await flush();
   assert.ok(elements['day-booth'].innerHTML.indexOf('&#128276; Sound On') !== -1);
-  assert.ok(audio.oscillatorCount > 1, 're-enabling the sound plays the preview buzz again');
+  assert.ok(audio.oscillatorCount > 1, 're-enabling the sound plays the preview rain alert again');
 
   // The alert is reserved for nullified scores. A newly discovered ordinary
   // flag — even one right after a touchdown, which the removed "points at
-  // risk" feature used to buzz for — is listed silently. (The game flips
+  // risk" feature used to alert for — is listed silently. (The game flips
   // back to live for this: one scoreboard tick re-reads its status, and the
   // next booth tick re-fetches its detail, resetting the cached final flag.)
   competition.status.type.state = 'in';
@@ -490,9 +520,9 @@ async function run() {
   assert.ok(elements['day-booth'].innerHTML.indexOf('R.Jones') !== -1,
     'the ordinary flag is still listed in the feed');
   assert.strictEqual(audio.oscillatorCount, oscillatorsBeforeFlag,
-    'an ordinary flag does not play the alert buzz');
+    'an ordinary flag does not play the alert sound');
 
-  // A newly discovered nullification does buzz. ESPN publishes the score
+  // A newly discovered nullification does alert. ESPN publishes the score
   // drop here (30-20 back to 24-20 after the reversal), so this exercises
   // the running-score signal rather than the wording.
   summary.drives.previous.push({
@@ -523,7 +553,7 @@ async function run() {
   await flush();
   assert.ok(elements['day-booth'].innerHTML.indexOf('the play was REVERSED') !== -1);
   assert.ok(audio.oscillatorCount > oscillatorsBeforeFlag,
-    'a nullified score plays the alert buzz');
+    'a nullified score plays the rain alert sound');
 
   // The all-games booth's Red zone filter: the per-game Red Zone tab cut
   // applied across the whole day feed — only booth events whose play started
@@ -729,9 +759,9 @@ async function run() {
   console.log('  ✓ a live-to-final transition fetches one final detail snapshot');
   console.log('  ✓ idle final-game ticks do not rebuild an unchanged booth feed');
   console.log('  ✓ live review content renders from the supplied API-shaped payload');
-  console.log('  ✓ the booth sound button toggles and plays the alert buzz');
+  console.log('  ✓ the booth sound button toggles and plays the rain alert sound');
   console.log('  ✓ a touchdown wiped by an accepted foul is badged NULLIFIED in feed and card');
-  console.log('  ✓ only nullified scores buzz: a plain flag is silent, a reversal alerts');
+  console.log('  ✓ only nullified scores alert: a plain flag is silent, a reversal alerts');
   console.log('  ✓ red-zone booth events carry the RZ badge in the all-games feed');
   console.log('  ✓ the all-games booth has the Red zone filter (chip, count, cut, click-through)');
   console.log('  ✓ the Red Zone tab shows only nullified red-zone scores, with working filters');
