@@ -14,6 +14,7 @@
   // last-play situation for the entire league in one response.
   const LIVE_HEADER_URL = 'https://site.web.api.espn.com/apis/v2/scoreboard/header?sport=football&league=nfl';
   const LIVE_REVIEW_SECONDS = NFLRefresh.LIVE_REVIEWS_INTERVAL_MS / 1000;
+  const LIVE_SCORE_SECONDS = NFLRefresh.LIVE_SCORES_INTERVAL_MS / 1000;
   const BOOTH_SOUND_KEY = 'nflBoothSoundEnabled'; // persisted toggle for the booth alert sound
 
   const TABS = [
@@ -672,7 +673,11 @@
     // response from racing a newer one.
     if (state.liveHeaderRequest) return;
     const stamp = toYMD(state.date);
-    const request = fetch(LIVE_HEADER_URL, { cache: 'no-store' })
+    // `cache: no-store` controls the browser cache. A unique, ignored query
+    // value also prevents a query-keyed intermediary from reusing the prior
+    // poll response; it cannot force ESPN's origin to publish a newer update.
+    const url = LIVE_HEADER_URL + '&_=' + Date.now();
+    const request = fetch(url, { cache: 'no-store' })
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -1009,8 +1014,8 @@
     const foot =
       'Every flag &amp; review from all of today&rsquo;s games · pulled from ESPN play-by-play · ' +
       'tracks score before &rarr; during &rarr; after when a nullified score comes off the board · ' +
-      'nullified &amp; red zone cover TD, FG, PAT &amp; 2-pt only · ' +
-      LIVE_REVIEW_SECONDS + 's live polling schedule' +
+      'nullified &amp; red zone cover TD, FG, PAT &amp; 2-pt only · score/status ' +
+      LIVE_SCORE_SECONDS + 's · play-by-play ' + LIVE_REVIEW_SECONDS + 's' +
       (scannable ? ' · games scanned ' + scanned + ' of ' + scannable : '') +
       (liveCount ? ' · ' + liveCount + ' game' + (liveCount === 1 ? '' : 's') + ' live' : '');
 

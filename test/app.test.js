@@ -390,12 +390,16 @@ async function run() {
   await flush();
   await flush();
 
-  assert.deepStrictEqual(timers.map(function (timer) { return timer.ms; }), [15000, 1000]);
+  assert.deepStrictEqual(timers.map(function (timer) { return timer.ms; }), [15000, 250, 1000]);
+  const scoreboardTimer = timers.find(function (timer) { return timer.ms === 15000; });
+  const liveScoreTimer = timers.find(function (timer) { return timer.ms === 250; });
+  const reviewTimer = timers.find(function (timer) { return timer.ms === 1000; });
+  assert.ok(scoreboardTimer && liveScoreTimer && reviewTimer);
   assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/sports/football/nfl/scoreboard') !== -1; }).length, 1);
   assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/summary') !== -1; }).length, 1);
   assert.ok(fetchOptions.every(function (options) { return options && options.cache === 'no-store'; }));
   assert.ok(elements['day-booth'].innerHTML.indexOf('Play under review.') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('1s live polling schedule') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('score/status 0.25s · play-by-play 1s') !== -1);
   assert.ok(elements['day-booth'].innerHTML.indexOf('booth-state') !== -1);
   assert.ok(elements['day-booth'].innerHTML.indexOf('bsh-label') !== -1);
   assert.ok(elements['day-booth'].innerHTML.indexOf('Score') !== -1);
@@ -423,19 +427,34 @@ async function run() {
   assert.ok(elements['day-booth'].innerHTML.indexOf('Red zone · 1') !== -1);
   assert.ok(elements['scoreboard-view'].innerHTML.indexOf('>NULLIFIED<') !== -1);
   assert.strictEqual(elements['scoreboard-view'].innerHTML.indexOf('PTS AT RISK'), -1);
+  // The 250ms score timer does not overlap a pending league-header request.
+  const headersBeforeFastTicks = fetches.filter(function (url) { return url.indexOf('/scoreboard/header') !== -1; }).length;
+  liveScoreTimer.callback();
+  liveScoreTimer.callback();
+  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/scoreboard/header') !== -1; }).length,
+    headersBeforeFastTicks + 1);
+  await flush();
+  liveScoreTimer.callback();
+  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/scoreboard/header') !== -1; }).length,
+    headersBeforeFastTicks + 2);
+  await flush();
   const scoreboardWritesBeforeResolution = elements['scoreboard-view'].innerHTMLWrites();
 
-  // A score from the live header is painted on the one-second path; it does
-  // not wait for the 15-second scoreboard request. The detail request below
-  // is held separately to preserve the dedupe check.
+  // A score from the live header is painted on the 250ms path; it does not
+  // wait for either the 15-second scoreboard or the one-second detail poll.
   competition.competitors.find(function (c) { return c.homeAway === 'away'; }).score = '23';
+  liveScoreTimer.callback();
+  await flush();
+  assert.ok(elements['scoreboard-view'].innerHTML.indexOf('team-score">23</div>') !== -1,
+    'live score is painted by the 250ms header response');
+  assert.strictEqual(elements['scoreboard-view'].innerHTMLWrites(), scoreboardWritesBeforeResolution + 1);
   // Two review ticks while one detail request is pending still create one fetch.
   holdSummaries = true;
-  timers[1].callback();
-  timers[1].callback();
+  reviewTimer.callback();
+  reviewTimer.callback();
   assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/summary') !== -1; }).length, 2);
   assert.strictEqual(pendingSummaries.length, 1);
-  assert.strictEqual(elements['scoreboard-view'].innerHTMLWrites(), scoreboardWritesBeforeResolution);
+  assert.strictEqual(elements['scoreboard-view'].innerHTMLWrites(), scoreboardWritesBeforeResolution + 1);
   summary.header.competitions[0].situation = {
     lastPlay: {
       id: '4018732869005',
@@ -451,7 +470,7 @@ async function run() {
   await flush();
   assert.ok(elements['day-booth'].innerHTML.indexOf('play was REVERSED') !== -1);
   assert.ok(elements['scoreboard-view'].innerHTML.indexOf('team-score">23</div>') !== -1,
-    'live score is painted by the one-second header response');
+    'live score remains painted after the detail response');
   assert.strictEqual(elements['scoreboard-view'].innerHTMLWrites(),
     scoreboardWritesBeforeResolution + 2); // score update + REVIEW badge removal
 
@@ -474,18 +493,18 @@ async function run() {
   competition.status.type.state = 'post';
   competition.status.type.completed = true;
   competition.status.type.shortDetail = 'Final';
-  timers[0].callback();
+  scoreboardTimer.callback();
   await flush();
   await flush();
   const beforeFinal = fetches.filter(function (url) { return url.indexOf('/summary') !== -1; }).length;
-  timers[1].callback();
+  reviewTimer.callback();
   assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/summary') !== -1; }).length,
     beforeFinal + 1);
   pendingSummaries.shift()();
   await flush();
   await flush();
   const dayWritesAfterFinal = elements['day-booth'].innerHTMLWrites();
-  timers[1].callback();
+  reviewTimer.callback();
   assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/summary') !== -1; }).length,
     beforeFinal + 1);
   assert.strictEqual(elements['day-booth'].innerHTMLWrites(), dayWritesAfterFinal);
@@ -523,7 +542,7 @@ async function run() {
   // next booth tick re-fetches its detail, resetting the cached final flag.)
   competition.status.type.state = 'in';
   competition.status.type.completed = false;
-  timers[0].callback(); // scoreboard refresh re-summarizes the game as live
+  scoreboardTimer.callback(); // scoreboard refresh re-summarizes the game as live
   await flush();
   await flush();
   const oscillatorsBeforeFlag = audio.oscillatorCount;
@@ -549,7 +568,7 @@ async function run() {
       }
     ]
   });
-  timers[1].callback();
+  reviewTimer.callback();
   assert.strictEqual(pendingSummaries.length, 1);
   pendingSummaries.shift()();
   await flush();
@@ -583,7 +602,7 @@ async function run() {
       }
     ]
   });
-  timers[1].callback();
+  reviewTimer.callback();
   assert.strictEqual(pendingSummaries.length, 1);
   pendingSummaries.shift()();
   await flush();

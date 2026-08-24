@@ -107,9 +107,9 @@ the repository root — no build step:
     and return stats per player, with team totals.
 - **Live updates** — the selected-day scoreboard endpoint refreshes every 15
   seconds. Separately, while a selected game is live and the tab is visible,
-  the app checks ESPN's league-wide live header and each game's detail every
-  second. The compact header supplies current score/status/situation across
-  the league, while game detail supplies play-by-play, flags/reviews, and
+  the app checks ESPN's league-wide live header every 250ms and each game's
+  detail every second. The compact header supplies current score/status/situation
+  across the league, while game detail supplies play-by-play, flags/reviews, and
   stats. Both requests bypass the browser cache and are independently
   de-duplicated, so a slow play-by-play response cannot hold up score/status
   painting. Review feeds paint on every completed response; the larger
@@ -249,15 +249,15 @@ as a red zone play — the app never guesses.
 ## Notes & limits
 
 - This is polling, not real-time push. In a visible tab, the nominal interval
-  is 1 second for the league-wide live-header score/status feed and for each
-  live game's detail/review feed. The separate selected-day scoreboard endpoint
-  is refreshed every 15 seconds. In-flight requests are not duplicated. Network
-  time, browser scheduling, and ESPN's own update timing are additional and are
-  outside this app's control.
-- The one-second timer attempts up to 60 header refreshes per minute plus up to
-  60 detail refreshes per live game per minute. A tick is skipped when that
-  request's previous fetch is still in flight; initial-load and tab-resume
-  refreshes are separate.
+  is 250ms for the league-wide live-header score/status feed and 1 second for
+  each live game's detail/review feed. The separate selected-day scoreboard
+  endpoint is refreshed every 15 seconds. In-flight requests are not duplicated.
+  Network time, browser scheduling, and ESPN's own update timing are additional
+  and outside this app's control.
+- The live-score timer attempts up to 240 header refreshes per minute; the
+  in-flight guard skips ticks while a prior header fetch is pending. The detail
+  timer attempts up to 60 refreshes per live game per minute and likewise skips
+  an in-flight request. Initial-load and tab-resume refreshes are separate.
 - Preseason games sometimes have `playByPlayAvailable: false`; the app shows a
   friendly "not available" message rather than erroring.
 - The day-wide booth chat does not invent per-play timestamps: plays are
