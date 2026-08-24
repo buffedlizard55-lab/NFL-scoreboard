@@ -15,8 +15,10 @@ function harness(visible) {
   const cleared = [];
   let scoreCalls = 0;
   let reviewCalls = 0;
+  let liveScoreCalls = 0;
   const polling = NFLRefresh.start({
     refreshScoreboard: function () { scoreCalls += 1; },
+    refreshLiveScores: function () { liveScoreCalls += 1; },
     refreshReviews: function () { reviewCalls += 1; },
     isVisible: function () { return visible.value; },
     setInterval: function (callback, ms) {
@@ -31,14 +33,16 @@ function harness(visible) {
     scheduled: scheduled,
     cleared: cleared,
     scoreCalls: function () { return scoreCalls; },
+    liveScoreCalls: function () { return liveScoreCalls; },
     reviewCalls: function () { return reviewCalls; }
   };
 }
 
 console.log('NFLRefresh polling tests');
 
-ok('exports the documented 15-second score and 1-second review cadences', function () {
+ok('exports the documented 15-second board, 250ms live-score, and 1-second review cadences', function () {
   assert.strictEqual(NFLRefresh.SCOREBOARD_INTERVAL_MS, 15000);
+  assert.strictEqual(NFLRefresh.LIVE_SCORES_INTERVAL_MS, 250);
   assert.strictEqual(NFLRefresh.LIVE_REVIEWS_INTERVAL_MS, 1000);
 });
 
@@ -51,17 +55,24 @@ ok('renders booth and red zone responses immediately while limiting non-review D
   assert.strictEqual(NFLRefresh.shouldRenderGameContent('team', 0, 10000), true);
 });
 
-ok('schedules score and review callbacks independently', function () {
+ok('schedules board, live-score, and review callbacks independently', function () {
   const h = harness({ value: true });
-  assert.strictEqual(h.scheduled.length, 2);
-  assert.deepStrictEqual(h.scheduled.map(function (timer) { return timer.ms; }), [15000, 1000]);
+  assert.strictEqual(h.scheduled.length, 3);
+  assert.deepStrictEqual(h.scheduled.map(function (timer) { return timer.ms; }), [15000, 250, 1000]);
 
   h.scheduled[0].callback();
   assert.strictEqual(h.scoreCalls(), 1);
+  assert.strictEqual(h.liveScoreCalls(), 0);
   assert.strictEqual(h.reviewCalls(), 0);
 
   h.scheduled[1].callback();
   assert.strictEqual(h.scoreCalls(), 1);
+  assert.strictEqual(h.liveScoreCalls(), 1);
+  assert.strictEqual(h.reviewCalls(), 0);
+
+  h.scheduled[2].callback();
+  assert.strictEqual(h.scoreCalls(), 1);
+  assert.strictEqual(h.liveScoreCalls(), 1);
   assert.strictEqual(h.reviewCalls(), 1);
   h.polling.stop();
 });
@@ -73,11 +84,13 @@ ok('does not poll while hidden and refreshes both streams on demand when visible
   h.scheduled.forEach(function (timer) { timer.callback(); });
   h.polling.refreshNow();
   assert.strictEqual(h.scoreCalls(), 0);
+  assert.strictEqual(h.liveScoreCalls(), 0);
   assert.strictEqual(h.reviewCalls(), 0);
 
   visible.value = true;
   h.polling.refreshNow();
   assert.strictEqual(h.scoreCalls(), 1);
+  assert.strictEqual(h.liveScoreCalls(), 1);
   assert.strictEqual(h.reviewCalls(), 1);
   h.polling.stop();
 });

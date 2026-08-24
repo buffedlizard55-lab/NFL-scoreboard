@@ -10,7 +10,11 @@
 
   const SCOREBOARD_URL = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard';
   const SUMMARY_URL = 'https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/summary';
+  // ESPN's compact header feed exposes the live event status, scores, and
+  // last-play situation for the entire league in one response.
+  const LIVE_HEADER_URL = 'https://site.web.api.espn.com/apis/v2/scoreboard/header?sport=football&league=nfl';
   const LIVE_REVIEW_SECONDS = NFLRefresh.LIVE_REVIEWS_INTERVAL_MS / 1000;
+  const LIVE_SCORE_SECONDS = NFLRefresh.LIVE_SCORES_INTERVAL_MS / 1000;
   const BOOTH_SOUND_KEY = 'nflBoothSoundEnabled'; // persisted toggle for the booth alert sound
 
   const TABS = [
@@ -152,6 +156,7 @@
     boothPrimed: false,    // first paint of a game's booth marks history as seen
     daySummaries: {},      // eventId -> { drives, situation, final }
     summaryRequests: {},   // eventId -> { promise, final } for an in-flight fetch
+    liveHeaderRequest: null, // one in-flight league-wide live-score request
     dayFeed: { items: [], primed: false }, // day-wide booth chat feed
     dayBoothNullified: {}, // eventId -> newest booth event's nullification state, for card badges
     dayBoothFilter: 'all', // day-wide booth filter, incl. the 'redzone' cut
@@ -547,6 +552,167 @@
     };
   }
 
+  /*
+   * The summary response is already fetched every second for each live game
+   * so the booth can inspect its play-by-play. Its header competition carries
+   * the same score/status-shaped fields used by the scoreboard. Apply only
+   * fields that are actually present; a partial summary (for example one
+   * containing just situation.lastPlay) must never overwrite a good card with
+   * blank data. This removes the former 0–14.999s wait for the separate
+   * scoreboard poll to paint a score that ESPN has already published in the
+   * summary response.
+   */
+  function eventCardSignature(ev) {
+    if (!ev) return '';
+    const away = ev.away || {};
+    const home = ev.home || {};
+    const st = ev.status || {};
+    return [away.score, home.score, st.state, st.shortDetail, st.detail,
+      st.clock, st.period, !!st.completed].join('|') + '|' + boothCardSignature(ev);
+  }
+
+  function hydrateEventFromSummary(ev, json) {
+    const competition = json && json.header && json.header.competitions &&
+      json.header.competitions[0];
+    if (!ev || !competition) return false;
+
+    let changed = false;
+    const bySide = {};
+    (competition.competitors || []).forEach(function (competitor) {
+      if (competitor && (competitor.homeAway === 'away' || competitor.homeAway === 'home')) {
+        bySide[competitor.homeAway] = competitor;
+      }
+    });
+
+    ['away', 'home'].forEach(function (side) {
+      const target = ev[side];
+      const source = bySide[side];
+      if (!target || !source) return;
+      if (source.score != null && target.score !== String(source.score)) {
+        target.score = String(source.score);
+        changed = true;
+      }
+      if (source.winner != null && target.winner !== !!source.winner) {
+        target.winner = !!source.winner;
+        changed = true;
+      }
+      if (Array.isArray(source.linescores)) {
+        const nextLinescores = source.linescores;
+        if (JSON.stringify(target.linescores || []) !== JSON.stringify(nextLinescores)) {
+          target.linescores = nextLinescores;
+          changed = true;
+        }
+      }
+    });
+
+    // statusInfo is the existing, fixture-tested mapper for a competition.
+    // Do not replace status unless the response includes its type object.
+    if (competition.status && competition.status.type) {
+      const nextStatus = NFLMap.statusInfo(competition);
+      if (JSON.stringify(ev.status || {}) !== JSON.stringify(nextStatus)) {
+        ev.status = nextStatus;
+        changed = true;
+      }
+    }
+    if (competition.situation && ev.situation !== competition.situation) {
+      ev.situation = competition.situation;
+      changed = true;
+    }
+    if (competition.playByPlayAvailable != null &&
+        ev.playByPlayAvailable !== competition.playByPlayAvailable) {
+      ev.playByPlayAvailable = competition.playByPlayAvailable;
+      changed = true;
+    }
+    return changed;
+  }
+
+  /*
+   * ESPN's live header endpoint does not use the scoreboard's nested
+   * `competition` shape. Adapt only its observed live fields, then share the
+   * guarded summary hydrator above. This keeps the two feeds consistent and
+   * ignores any missing/partial header fields.
+   */
+  function liveHeaderEvents(data) {
+    const out = [];
+    (data && data.sports || []).forEach(function (sport) {
+      (sport && sport.leagues || []).forEach(function (league) {
+        (league && league.events || []).forEach(function (event) { out.push(event); });
+      });
+    });
+    return out;
+  }
+
+  function headerCompetition(event) {
+    if (!event) return null;
+    const full = event.fullStatus || {};
+    return {
+      competitors: (event.competitors || []).map(function (team) {
+        return {
+          homeAway: team.homeAway,
+          score: team.score,
+          winner: team.winner
+        };
+      }),
+      status: full.type ? {
+        type: full.type,
+        displayClock: full.displayClock != null ? full.displayClock : full.clock,
+        period: full.period
+      } : null,
+      situation: event.situation || null,
+      playByPlayAvailable: event.playByPlayAvailable
+    };
+  }
+
+  function refreshLiveScores() {
+    // This endpoint is for ESPN's current live header; it is not a substitute
+    // for browsing an arbitrary historical day, and is skipped when nothing
+    // selected is live.
+    if (!state.events.some(function (ev) { return ev.status && ev.status.state === 'in'; })) return;
+    // A timer tick never starts a second league-wide request while the prior
+    // one is still on the wire. This bounds traffic and prevents an older
+    // response from racing a newer one.
+    if (state.liveHeaderRequest) return;
+    const stamp = toYMD(state.date);
+    // `cache: no-store` controls the browser cache. A unique, ignored query
+    // value also prevents a query-keyed intermediary from reusing the prior
+    // poll response; it cannot force ESPN's origin to publish a newer update.
+    const url = LIVE_HEADER_URL + '&_=' + Date.now();
+    const request = fetch(url, { cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      });
+    state.liveHeaderRequest = request;
+    request
+      .then(function (data) {
+        if (toYMD(state.date) !== stamp) return;
+        const byId = {};
+        liveHeaderEvents(data).forEach(function (event) {
+          if (event && event.id != null) byId[String(event.id)] = event;
+        });
+        let cardsChanged = false;
+        let openChanged = false;
+        state.events.forEach(function (ev) {
+          const source = byId[String(ev.id)];
+          if (!source) return;
+          const before = eventCardSignature(ev);
+          const competition = headerCompetition(source);
+          if (!competition) return;
+          hydrateEventFromSummary(ev, { header: { competitions: [competition] } });
+          if (eventCardSignature(ev) !== before) {
+            cardsChanged = true;
+            if (current() === ev) openChanged = true;
+          }
+        });
+        if (cardsChanged && !$('scoreboard-view').classList.contains('hidden')) renderScoreboard();
+        if (openChanged && current()) renderGameHeader();
+      })
+      .catch(function () { /* the detail/scoreboard paths remain fallbacks */ })
+      .then(function () {
+        if (state.liveHeaderRequest === request) state.liveHeaderRequest = null;
+      });
+  }
+
   function dayBoothGames() {
     return state.events.slice().sort(function (a, b) {
       const ta = a.date ? new Date(a.date).getTime() : 0;
@@ -587,8 +753,9 @@
         request.promise
           .then(function (json) {
             if (toYMD(state.date) !== stamp) return; // the user moved on
-            const cardSigBefore = boothCardSignature(ev);
+            const cardSigBefore = eventCardSignature(ev);
             cacheDaySummary(ev.id, json, request.final);
+            hydrateEventFromSummary(ev, json);
 
             const open = current();
             if (open && open.id === ev.id) {
@@ -608,7 +775,7 @@
             // state; then repaint the cards only when a badge (review /
             // nullified / points removed) actually changed.
             renderDayBooth();
-            if (boothCardSignature(ev) !== cardSigBefore &&
+            if (eventCardSignature(ev) !== cardSigBefore &&
                 !$('scoreboard-view').classList.contains('hidden')) {
               renderScoreboard();
             }
@@ -847,8 +1014,8 @@
     const foot =
       'Every flag &amp; review from all of today&rsquo;s games · pulled from ESPN play-by-play · ' +
       'tracks score before &rarr; during &rarr; after when a nullified score comes off the board · ' +
-      'nullified &amp; red zone cover TD, FG, PAT &amp; 2-pt only · ' +
-      LIVE_REVIEW_SECONDS + 's live polling schedule' +
+      'nullified &amp; red zone cover TD, FG, PAT &amp; 2-pt only · score/status ' +
+      LIVE_SCORE_SECONDS + 's · play-by-play ' + LIVE_REVIEW_SECONDS + 's' +
       (scannable ? ' · games scanned ' + scanned + ' of ' + scannable : '') +
       (liveCount ? ' · ' + liveCount + ' game' + (liveCount === 1 ? '' : 's') + ' live' : '');
 
@@ -1033,6 +1200,7 @@
         const open = current();
         if (!open || open.id !== id) return; // stale response
         cacheDaySummary(id, json, request.final);
+        hydrateEventFromSummary(open, json);
         state.summary = json;
         renderGameHeader();
         renderTabContent();
@@ -1623,6 +1791,7 @@
     if (state.polling) state.polling.stop();
     state.polling = NFLRefresh.start({
       refreshScoreboard: refreshScoreboard,
+      refreshLiveScores: refreshLiveScores,
       refreshReviews: refreshDayBooth,
       isVisible: function () { return document.visibilityState !== 'hidden'; }
     });
