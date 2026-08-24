@@ -547,6 +547,80 @@
     };
   }
 
+  /*
+   * The summary response is already fetched every second for each live game
+   * so the booth can inspect its play-by-play. Its header competition carries
+   * the same score/status-shaped fields used by the scoreboard. Apply only
+   * fields that are actually present; a partial summary (for example one
+   * containing just situation.lastPlay) must never overwrite a good card with
+   * blank data. This removes the former 0–14.999s wait for the separate
+   * scoreboard poll to paint a score that ESPN has already published in the
+   * summary response.
+   */
+  function eventCardSignature(ev) {
+    if (!ev) return '';
+    const away = ev.away || {};
+    const home = ev.home || {};
+    const st = ev.status || {};
+    return [away.score, home.score, st.state, st.shortDetail, st.detail,
+      st.clock, st.period, !!st.completed].join('|') + '|' + boothCardSignature(ev);
+  }
+
+  function hydrateEventFromSummary(ev, json) {
+    const competition = json && json.header && json.header.competitions &&
+      json.header.competitions[0];
+    if (!ev || !competition) return false;
+
+    let changed = false;
+    const bySide = {};
+    (competition.competitors || []).forEach(function (competitor) {
+      if (competitor && (competitor.homeAway === 'away' || competitor.homeAway === 'home')) {
+        bySide[competitor.homeAway] = competitor;
+      }
+    });
+
+    ['away', 'home'].forEach(function (side) {
+      const target = ev[side];
+      const source = bySide[side];
+      if (!target || !source) return;
+      if (source.score != null && target.score !== String(source.score)) {
+        target.score = String(source.score);
+        changed = true;
+      }
+      if (source.winner != null && target.winner !== !!source.winner) {
+        target.winner = !!source.winner;
+        changed = true;
+      }
+      if (Array.isArray(source.linescores)) {
+        const nextLinescores = source.linescores;
+        if (JSON.stringify(target.linescores || []) !== JSON.stringify(nextLinescores)) {
+          target.linescores = nextLinescores;
+          changed = true;
+        }
+      }
+    });
+
+    // statusInfo is the existing, fixture-tested mapper for a competition.
+    // Do not replace status unless the response includes its type object.
+    if (competition.status && competition.status.type) {
+      const nextStatus = NFLMap.statusInfo(competition);
+      if (JSON.stringify(ev.status || {}) !== JSON.stringify(nextStatus)) {
+        ev.status = nextStatus;
+        changed = true;
+      }
+    }
+    if (competition.situation && ev.situation !== competition.situation) {
+      ev.situation = competition.situation;
+      changed = true;
+    }
+    if (competition.playByPlayAvailable != null &&
+        ev.playByPlayAvailable !== competition.playByPlayAvailable) {
+      ev.playByPlayAvailable = competition.playByPlayAvailable;
+      changed = true;
+    }
+    return changed;
+  }
+
   function dayBoothGames() {
     return state.events.slice().sort(function (a, b) {
       const ta = a.date ? new Date(a.date).getTime() : 0;
@@ -587,8 +661,9 @@
         request.promise
           .then(function (json) {
             if (toYMD(state.date) !== stamp) return; // the user moved on
-            const cardSigBefore = boothCardSignature(ev);
+            const cardSigBefore = eventCardSignature(ev);
             cacheDaySummary(ev.id, json, request.final);
+            hydrateEventFromSummary(ev, json);
 
             const open = current();
             if (open && open.id === ev.id) {
@@ -608,7 +683,7 @@
             // state; then repaint the cards only when a badge (review /
             // nullified / points removed) actually changed.
             renderDayBooth();
-            if (boothCardSignature(ev) !== cardSigBefore &&
+            if (eventCardSignature(ev) !== cardSigBefore &&
                 !$('scoreboard-view').classList.contains('hidden')) {
               renderScoreboard();
             }
@@ -1033,6 +1108,7 @@
         const open = current();
         if (!open || open.id !== id) return; // stale response
         cacheDaySummary(id, json, request.final);
+        hydrateEventFromSummary(open, json);
         state.summary = json;
         renderGameHeader();
         renderTabContent();

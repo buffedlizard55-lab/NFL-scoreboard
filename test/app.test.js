@@ -177,7 +177,11 @@ async function run() {
   })();
 
   const summary = JSON.parse(JSON.stringify(sample.summary));
-  summary.header = { competitions: [{ situation: competition.situation }] };
+  // The real summary endpoint's header competition contains the same score
+  // and status fields used by the scoreboard. Keep this API-shaped fixture
+  // linked to the live scoreboard competition so detail-response hydration is
+  // exercised alongside the one-second booth refresh.
+  summary.header = { competitions: [competition] };
   // Add an API-shaped reversed-TD sequence so the booth smoke test also
   // exercises the new before/during/after + points-removed rendering.
   summary.drives.previous.push({
@@ -397,6 +401,10 @@ async function run() {
   assert.strictEqual(elements['scoreboard-view'].innerHTML.indexOf('PTS AT RISK'), -1);
   const scoreboardWritesBeforeResolution = elements['scoreboard-view'].innerHTMLWrites();
 
+  // A score that arrives in the already-requested summary is painted on this
+  // one-second detail path; it does not wait for the 15-second scoreboard
+  // request. The next request is held to preserve the dedupe check below.
+  competition.competitors.find(function (c) { return c.homeAway === 'away'; }).score = '23';
   // Two review ticks while one detail request is pending still create one fetch.
   holdSummaries = true;
   timers[1].callback();
@@ -418,6 +426,8 @@ async function run() {
   await flush();
   await flush();
   assert.ok(elements['day-booth'].innerHTML.indexOf('play was REVERSED') !== -1);
+  assert.ok(elements['scoreboard-view'].innerHTML.indexOf('team-score">23</div>') !== -1,
+    'summary score is painted by the one-second detail response');
   assert.strictEqual(elements['scoreboard-view'].innerHTMLWrites(),
     scoreboardWritesBeforeResolution + 1); // REVIEW badge was removed
 

@@ -105,15 +105,17 @@ the repository root — no build step:
     passing, rushing, 3rd/4th down, red zone, turnovers, time of possession…).
   - **Player Stats** — passing, rushing, receiving, defense, kicking, punting,
     and return stats per player, with team totals.
-- **Live updates** — score/status data refreshes every 15 seconds. In a visible
-  browser tab, live game detail (play-by-play, flags/reviews, and stats) is
-  checked independently every second, so it does not wait for the scoreboard
-  request. Review feeds paint on every completed response; the larger non-review
-  tabs retain their previous 5-second paint cadence to avoid unnecessary DOM
-  churn. Poll requests bypass the browser HTTP cache, and in-flight detail
-  requests are shared instead of duplicated. Finished games receive one final
-  detail snapshot and are then cached for the selected day. Returning to a
-  backgrounded tab triggers an immediate refresh. A red
+- **Live updates** — the scoreboard endpoint refreshes every 15 seconds, while
+  each live game's detail (play-by-play, flags/reviews, stats, **score, and
+  status**) is checked independently every second in a visible tab. The app
+  immediately hydrates a game card from score/status fields that are present in
+  that already-requested summary response, so a published score does not wait
+  for the next scoreboard poll. Review feeds paint on every completed response;
+  the larger non-review tabs retain their previous 5-second paint cadence to
+  avoid unnecessary DOM churn. Poll requests bypass the browser HTTP cache, and
+  in-flight detail requests are shared instead of duplicated. Finished games
+  receive one final detail snapshot and are then cached for the selected day.
+  Returning to a backgrounded tab triggers an immediate refresh. A red
   **LIVE** badge appears whenever a game is live.
 
 ## Where the data comes from (the honest answer on "reverse-engineering NFL.com")
@@ -244,10 +246,11 @@ as a red zone play — the app never guesses.
 ## Notes & limits
 
 - This is polling, not real-time push. In a visible tab, the nominal polling
-  intervals are 1 second for live game-detail/review data and 15 seconds for
-  score/status data. In-flight requests are not duplicated. Network time,
-  browser scheduling, and ESPN's own update timing are additional and are
-  outside this app's control.
+  interval is 1 second for live game-detail/review data; score/status fields
+  present in those detail responses are painted on that same path. The separate
+  scoreboard endpoint is refreshed every 15 seconds for the day-wide schedule.
+  In-flight requests are not duplicated. Network time, browser scheduling, and
+  ESPN's own update timing are additional and are outside this app's control.
 - The one-second timer attempts up to 60 detail refreshes per minute for each
   live game. A tick is skipped when that game's previous request is still in
   flight; initial-load and tab-resume refreshes are separate.
