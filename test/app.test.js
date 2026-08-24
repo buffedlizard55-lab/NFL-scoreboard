@@ -142,6 +142,19 @@ async function run() {
             start: { yardsToEndzone: 12, downDistanceText: '1st & 10 at LAC 12' }
           },
           {
+            // Red zone AND nullified: a touchdown wiped by an accepted foul,
+            // in ESPN's published wording. This is what the all-games Red
+            // zone chip counts for this game.
+            id: 'g2rz2', sequenceNumber: '105', type: { text: 'Penalty' },
+            text: 'B.Purdy pass short left to G.Kittle for 9 yards, TOUCHDOWN NULLIFIED by ' +
+              'Penalty.PENALTY on SF-C.McCaffrey, Offensive Pass Interference, 10 yards, ' +
+              'enforced at LAC 9 - No Play.',
+            awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: true,
+            penalty: { yards: 10, type: { text: 'Offensive Pass Interference' } },
+            period: { number: 1 }, clock: { displayValue: '9:10' },
+            start: { yardsToEndzone: 9, downDistanceText: '1st & Goal at LAC 9' }
+          },
+          {
             // Midfield: outside the red zone.
             id: 'g2p1', sequenceNumber: '110', type: { text: 'Penalty' },
             text: 'PENALTY on SF-T.Williams, False Start, 5 yards, enforced at SF 47 - No Play.',
@@ -197,27 +210,33 @@ async function run() {
       }
     ]
   });
-  // A still-pending review of a ruled touchdown: exactly the live moment the
-  // points-at-risk highlight exists for. High sequence numbers keep it the
-  // game's newest booth entry (card badge); its running score continues from
-  // the fixture's Q4 plays (16-20) so the touchdown really adds points.
+  // A touchdown wiped out by an accepted foul, in ESPN's published wording
+  // (cf. Super Bowl LIX: "...TOUCHDOWN NULLIFIED by Penalty.PENALTY on
+  // KC-J.Smith-Schuster, Offensive Pass Interference, 10 yards, enforced at
+  // PHI 4 - No Play."). ESPN never counts these points, so the running score
+  // never moves — the wording is the only signal. High sequence numbers keep
+  // it the game's newest booth entry (which drives the card badge), and it
+  // carries no position data so it stays out of the red-zone cut.
   summary.drives.previous.push({
-    id: 'atrisk-td-drive',
-    description: 'fixture: touchdown under review (pending)',
+    id: 'nullified-td-drive',
+    description: 'fixture: touchdown nullified by penalty',
     result: 'No Play',
     displayResult: 'No Play',
     isScore: false,
     team: { abbreviation: 'LV', displayName: 'Las Vegas Raiders', logos: [] },
     plays: [
       {
-        id: 'risk-1', sequenceNumber: '9000000', type: { text: 'Rush' },
-        text: 'D.Carter 3 yard run, TOUCHDOWN.', awayScore: 23, homeScore: 20,
-        scoringPlay: true, isPenalty: false
+        id: 'null-1', sequenceNumber: '9000000', type: { text: 'Rush' },
+        text: 'W.Marks left end for 6 yards.', awayScore: 16, homeScore: 20,
+        scoringPlay: false, isPenalty: false
       },
       {
-        id: 'risk-2', sequenceNumber: '9000100', type: { text: 'Pass Reception' },
-        text: 'Play under review.', awayScore: 23, homeScore: 20,
-        scoringPlay: false, isPenalty: false
+        id: 'null-2', sequenceNumber: '9000100', type: { text: 'Penalty' },
+        text: 'D.Carter 3 yard run, TOUCHDOWN NULLIFIED by Penalty.PENALTY on ' +
+          'LV-D.Parham, Offensive Holding, 10 yards, enforced at HST 3 - No Play.',
+        awayScore: 16, homeScore: 20,
+        scoringPlay: false, isPenalty: true,
+        penalty: { yards: 10, type: { text: 'Offensive Holding' } }
       }
     ]
   });
@@ -332,19 +351,22 @@ async function run() {
   // day feed; its non-red-zone counterpart (LV 25) does not.
   assert.ok(elements['day-booth'].innerHTML.indexOf('badge rz') !== -1);
   assert.ok(elements['day-booth'].innerHTML.indexOf('enforced at HST 19') !== -1);
-  // Points at risk: the pending review of the ruled touchdown is highlighted
-  // in the day feed, names the score it could wipe and its scoring play, is
-  // filterable, and is badged on the game card.
-  assert.ok(elements['day-booth'].innerHTML.indexOf('badge atrisk') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('LV 7 PTS AT RISK') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('D.Carter 3 yard run, TOUCHDOWN.') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('data-day-filter="risk"') !== -1);
+  // Nullified scores: the wiped touchdown is highlighted in the day feed, is
+  // filterable, and is badged on the game card. Nothing is reported for the
+  // ordinary flags and pending reviews around it.
+  assert.ok(elements['day-booth'].innerHTML.indexOf('badge removed') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('TOUCHDOWN NULLIFIED by Penalty') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('data-day-filter="nullified"') !== -1);
+  assert.strictEqual(elements['day-booth'].innerHTML.indexOf('PTS AT RISK'), -1);
+  assert.strictEqual(elements['day-booth'].innerHTML.indexOf('data-day-filter="risk"'), -1);
   // The all-games booth also exposes the per-game Red Zone cut as a filter
-  // chip. The feed currently holds exactly one red-zone booth event (the
-  // false start enforced at HST 19), so the chip counts it.
+  // chip, restricted to nullified scores. The feed holds two red-zone booth
+  // events — the false start enforced at HST 19 and the nullified red-zone
+  // touchdown — but only the nullified one counts.
   assert.ok(elements['day-booth'].innerHTML.indexOf('data-day-filter="redzone"') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('Red zone · 0') !== -1);
-  assert.ok(elements['scoreboard-view'].innerHTML.indexOf('PTS AT RISK') !== -1);
+  assert.ok(elements['day-booth'].innerHTML.indexOf('Red zone · 1') !== -1);
+  assert.ok(elements['scoreboard-view'].innerHTML.indexOf('>NULLIFIED<') !== -1);
+  assert.strictEqual(elements['scoreboard-view'].innerHTML.indexOf('PTS AT RISK'), -1);
   const scoreboardWritesBeforeResolution = elements['scoreboard-view'].innerHTMLWrites();
 
   // Two review ticks while one detail request is pending still create one fetch.
@@ -427,31 +449,32 @@ async function run() {
   assert.ok(elements['day-booth'].innerHTML.indexOf('&#128276; Sound On') !== -1);
   assert.ok(audio.oscillatorCount > 1, 're-enabling the sound plays the preview buzz again');
 
-  // A newly discovered flag right after a fresh touchdown is at risk and —
-  // unlike ordinary penalties — plays the alert buzz. (The game flips back
-  // to live for this: one scoreboard tick re-reads its status, and the next
-  // booth tick re-fetches its detail, resetting the cached final flag.)
+  // The alert is reserved for nullified scores. A newly discovered ordinary
+  // flag — even one right after a touchdown, which the removed "points at
+  // risk" feature used to buzz for — is listed silently. (The game flips
+  // back to live for this: one scoreboard tick re-reads its status, and the
+  // next booth tick re-fetches its detail, resetting the cached final flag.)
   competition.status.type.state = 'in';
   competition.status.type.completed = false;
   timers[0].callback(); // scoreboard refresh re-summarizes the game as live
   await flush();
   await flush();
-  const oscillatorsBeforeRisk = audio.oscillatorCount;
+  const oscillatorsBeforeFlag = audio.oscillatorCount;
   summary.drives.previous.push({
-    id: 'atrisk-penalty-drive',
-    description: 'fixture: flag after a touchdown',
+    id: 'plain-penalty-drive',
+    description: 'fixture: ordinary flag after a touchdown',
     result: 'No Play',
     displayResult: 'No Play',
     isScore: false,
     team: { abbreviation: 'LV', displayName: 'Las Vegas Raiders', logos: [] },
     plays: [
       {
-        id: 'riskp-1', sequenceNumber: '9500000', type: { text: 'Rush' },
+        id: 'flagp-1', sequenceNumber: '9500000', type: { text: 'Rush' },
         text: 'A.Okafor left end for 4 yards, TOUCHDOWN.', awayScore: 30, homeScore: 20,
         scoringPlay: true, isPenalty: false
       },
       {
-        id: 'riskp-2', sequenceNumber: '9500100', type: { text: 'Penalty' },
+        id: 'flagp-2', sequenceNumber: '9500100', type: { text: 'Penalty' },
         text: 'PENALTY on LV-R.Jones, Offensive Holding, 10 yards, enforced at LV 16 - No Play.',
         awayScore: 30, homeScore: 20,
         scoringPlay: false, isPenalty: true,
@@ -464,10 +487,43 @@ async function run() {
   pendingSummaries.shift()();
   await flush();
   await flush();
-  assert.ok(elements['day-booth'].innerHTML.indexOf('R.Jones') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('badge atrisk') !== -1);
-  assert.ok(audio.oscillatorCount > oscillatorsBeforeRisk,
-    'an at-risk penalty plays the alert buzz');
+  assert.ok(elements['day-booth'].innerHTML.indexOf('R.Jones') !== -1,
+    'the ordinary flag is still listed in the feed');
+  assert.strictEqual(audio.oscillatorCount, oscillatorsBeforeFlag,
+    'an ordinary flag does not play the alert buzz');
+
+  // A newly discovered nullification does buzz. ESPN publishes the score
+  // drop here (30-20 back to 24-20 after the reversal), so this exercises
+  // the running-score signal rather than the wording.
+  summary.drives.previous.push({
+    id: 'nullified-alert-drive',
+    description: 'fixture: touchdown reversed on review',
+    result: 'No Play',
+    displayResult: 'No Play',
+    isScore: false,
+    team: { abbreviation: 'LV', displayName: 'Las Vegas Raiders', logos: [] },
+    plays: [
+      {
+        id: 'nullp-1', sequenceNumber: '9600000', type: { text: 'Pass Reception' },
+        text: 'A.Meyers pass deep right for 22 yards, TOUCHDOWN.', awayScore: 30, homeScore: 20,
+        scoringPlay: true, isPenalty: false
+      },
+      {
+        id: 'nullp-2', sequenceNumber: '9600100', type: { text: 'Replay Review' },
+        text: 'The Replay Official reviewed the pass completion ruling, and the play was REVERSED.',
+        awayScore: 24, homeScore: 20,
+        scoringPlay: false, isPenalty: false
+      }
+    ]
+  });
+  timers[1].callback();
+  assert.strictEqual(pendingSummaries.length, 1);
+  pendingSummaries.shift()();
+  await flush();
+  await flush();
+  assert.ok(elements['day-booth'].innerHTML.indexOf('the play was REVERSED') !== -1);
+  assert.ok(audio.oscillatorCount > oscillatorsBeforeFlag,
+    'a nullified score plays the alert buzz');
 
   // The all-games booth's Red zone filter: the per-game Red Zone tab cut
   // applied across the whole day feed — only booth events whose play started
@@ -556,15 +612,24 @@ async function run() {
     }
   });
   const rzHTML = elements['game-content'].innerHTML;
-  assert.ok(rzHTML.indexOf('Red zone flags, challenges &amp; replay reviews') !== -1);
-  // The red-zone false start (HOU 19) is shown, with its RZ badge.
+  assert.ok(rzHTML.indexOf('Red zone nullified scores') !== -1);
+  // The regression this tab exists for: the fixture's red-zone touchdown
+  // wiped by an accepted foul (enforced at HST 14) IS shown, badged, and
+  // counted in the banner.
+  assert.ok(rzHTML.indexOf('TOUCHDOWN NULLIFIED by Penalty') !== -1);
+  assert.ok(rzHTML.indexOf('enforced at HST 14') !== -1);
+  assert.ok(rzHTML.indexOf('badge rz') !== -1);
+  assert.ok(rzHTML.indexOf('1 NULLIFIED IN RZ') !== -1);
+  // The red-zone false start at HOU 19 wiped no score, so it is excluded.
   assert.strictEqual(rzHTML.indexOf('enforced at HST 19'), -1);
-  assert.strictEqual(rzHTML.indexOf('badge rz'), -1);
-  // Non-red-zone booth events are excluded: the LV 25 false start, the HOU 34
-  // replay/review entries, and the live under-review play (no position data).
+  // Non-red-zone booth events are excluded too: the LV 25 false start, the
+  // HOU 34 replay/review entries, and the live under-review play (which
+  // carries no position data).
   assert.ok(rzHTML.indexOf('enforced at LV 25') === -1);
   assert.ok(rzHTML.indexOf('Play under review') === -1);
   assert.ok(rzHTML.indexOf('data-redzone-filter') !== -1);
+  assert.strictEqual(rzHTML.indexOf('PTS AT RISK'), -1);
+  assert.strictEqual(rzHTML.indexOf('data-redzone-filter="risk"'), -1);
 
   // The red zone filter buttons are wired through the delegated handler.
   elements['game-content'].dispatch('click', {
@@ -583,10 +648,12 @@ async function run() {
     'class="booth-filter active" data-redzone-filter="penalty"') !== -1);
 
   // --- Multi-game day: the Red zone filter cuts EVERY game of the day -----
-  // The next day serves two live games: LV @ HOU (one red-zone booth event,
-  // the false start enforced at HST 19) and SF @ LAC (one red-zone challenge
-  // at the LAC 12, plus one midfield flag). holdSummaries is off again, so
-  // every request resolves on its own.
+  // The next day serves two live games. Each has exactly one nullified
+  // red-zone score: LV @ HOU's touchdown wiped at HST 14, and SF @ LAC's
+  // touchdown wiped at LAC 9. Each also carries red-zone events that wiped
+  // nothing (the HST 19 false start, the LAC 12 upheld challenge) plus
+  // events from farther out. holdSummaries is off again, so every request
+  // resolves on its own.
   holdSummaries = false;
   elements['next-day'].dispatch('click', {});
   await flush();
@@ -597,19 +664,25 @@ async function run() {
   const twoGameDay = elements['day-booth'].innerHTML;
   assert.ok(elements['scoreboard-view'].innerHTML.indexOf('data-id="299001001"') !== -1);
   assert.ok(twoGameDay.indexOf('enforced at HST 19') !== -1);   // game A, red zone
+  assert.ok(twoGameDay.indexOf('enforced at HST 14') !== -1);   // game A, red zone, nullified
   assert.ok(twoGameDay.indexOf('catch ruling') !== -1);         // game B, red zone
+  assert.ok(twoGameDay.indexOf('enforced at LAC 9') !== -1);    // game B, red zone, nullified
   assert.ok(twoGameDay.indexOf('enforced at SF 47') !== -1);    // game B, midfield
-  // The Red zone chip counts red-zone events from EACH game: 1 + 1.
-  assert.ok(twoGameDay.indexOf('Red zone · 0') !== -1);
+  // The Red zone chip counts the nullified red-zone score of EACH game: 1 + 1.
+  assert.ok(twoGameDay.indexOf('Red zone · 2') !== -1);
 
   clickDayFilter('redzone');
   const twoGameRz = elements['day-booth'].innerHTML;
   assert.ok(twoGameRz.indexOf(
     'class="booth-filter day-filter active" data-day-filter="redzone"') !== -1);
-  // The red zone events of BOTH games are kept…
-  // None are nullifiable scoring plays, so the count stays 0 and no events show.
-  assert.ok(twoGameRz.indexOf('Red zone · 0') !== -1);
-  // …and everything farther out is hidden, whichever game it came from.
+  // The nullified red-zone score of BOTH games is kept…
+  assert.ok(twoGameRz.indexOf('Red zone · 2') !== -1);
+  assert.ok(twoGameRz.indexOf('enforced at HST 14') !== -1);
+  assert.ok(twoGameRz.indexOf('enforced at LAC 9') !== -1);
+  // …while red-zone events that wiped no score are hidden…
+  assert.strictEqual(twoGameRz.indexOf('enforced at HST 19'), -1);
+  assert.strictEqual(twoGameRz.indexOf('catch ruling'), -1);
+  // …and so is everything farther out, whichever game it came from.
   assert.ok(twoGameRz.indexOf('enforced at SF 47') === -1);
   assert.ok(twoGameRz.indexOf('enforced at LV 25') === -1);
   assert.ok(twoGameRz.indexOf('Play under review') === -1);
@@ -635,9 +708,10 @@ async function run() {
   assert.ok(elements['tabs'].innerHTML.indexOf(
     'class="tab active" data-tab="redzone"') !== -1);
   const secondGameRz = elements['game-content'].innerHTML;
-  assert.ok(secondGameRz.indexOf('Red zone flags, challenges &amp; replay reviews') !== -1);
+  assert.ok(secondGameRz.indexOf('Red zone nullified scores') !== -1);
+  assert.ok(secondGameRz.indexOf('enforced at LAC 9') !== -1);
+  assert.ok(secondGameRz.indexOf('1 NULLIFIED IN RZ') !== -1);
   assert.strictEqual(secondGameRz.indexOf('catch ruling'), -1);
-  assert.strictEqual(secondGameRz.indexOf('badge rz'), -1);
   assert.ok(secondGameRz.indexOf('enforced at SF 47') === -1);
 
   // Leave the day booth in its default state for tidiness.
@@ -656,12 +730,12 @@ async function run() {
   console.log('  ✓ idle final-game ticks do not rebuild an unchanged booth feed');
   console.log('  ✓ live review content renders from the supplied API-shaped payload');
   console.log('  ✓ the booth sound button toggles and plays the alert buzz');
-  console.log('  ✓ a pending review of a touchdown is badged POINTS AT RISK in feed and card');
-  console.log('  ✓ a newly appearing at-risk penalty triggers the alert buzz');
+  console.log('  ✓ a touchdown wiped by an accepted foul is badged NULLIFIED in feed and card');
+  console.log('  ✓ only nullified scores buzz: a plain flag is silent, a reversal alerts');
   console.log('  ✓ red-zone booth events carry the RZ badge in the all-games feed');
   console.log('  ✓ the all-games booth has the Red zone filter (chip, count, cut, click-through)');
-  console.log('  ✓ the Red Zone tab shows only red-zone flags/reviews, with working filters');
-  console.log('  ✓ a two-game day counts and filters red-zone events from EACH game');
+  console.log('  ✓ the Red Zone tab shows only nullified red-zone scores, with working filters');
+  console.log('  ✓ a two-game day counts and filters nullified red-zone scores from EACH game');
 }
 
 run().catch(function (err) {
