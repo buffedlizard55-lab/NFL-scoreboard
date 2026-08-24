@@ -637,26 +637,68 @@
     }
   }
 
-  function buzzBoothAlert() {
+  /*
+   * A gentle 3-second "rain" alert: a soft low-passed noise bed (steady
+   * rainfall) that fades in and out, plus three quiet descending sine
+   * "droplet" plips so it clearly reads as water. This replaced an earlier
+   * 180 Hz sawtooth buzzer that was unpleasant to hear repeatedly.
+   */
+  function playBoothAlert() {
     const ctx = state.audioContext;
     if (!ctx) return;
     try {
-      const oscillator = ctx.createOscillator();
-      const gain = ctx.createGain();
       const start = ctx.currentTime;
-      oscillator.type = 'sawtooth';
-      oscillator.frequency.setValueAtTime(180, start);
-      gain.gain.setValueAtTime(0.0001, start);
-      // A pulsing three-second tone is clearly a buzz without being continuous.
-      for (let i = 0; i < 6; i += 1) {
-        const at = start + i * 0.5;
-        gain.gain.linearRampToValueAtTime(0.12, at + 0.04);
-        gain.gain.linearRampToValueAtTime(0.0001, at + 0.24);
+      const DURATION = 3; // seconds — matches the old alert length
+
+      // --- Rain bed: brown-ish noise, softened by a low-pass filter ---
+      const sampleRate = ctx.sampleRate || 44100;
+      const frameCount = Math.floor(sampleRate * DURATION);
+      const buffer = ctx.createBuffer(1, frameCount, sampleRate);
+      const data = buffer.getChannelData(0);
+      // Integrate white noise (leaky integrator) so the hiss is deep and
+      // soft like rainfall instead of harsh static.
+      let last = 0;
+      for (let i = 0; i < frameCount; i += 1) {
+        const white = Math.random() * 2 - 1;
+        last = (last + 0.02 * white) / 1.02;
+        data[i] = last * 3.5;
       }
-      oscillator.connect(gain);
-      gain.connect(ctx.destination);
-      oscillator.start(start);
-      oscillator.stop(start + 3);
+      const rain = ctx.createBufferSource();
+      rain.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(1000, start);
+      const rainGain = ctx.createGain();
+      rainGain.gain.setValueAtTime(0.0001, start);
+      rainGain.gain.linearRampToValueAtTime(0.22, start + 0.5);   // gentle fade in
+      rainGain.gain.setValueAtTime(0.22, start + 2.3);            // hold
+      rainGain.gain.linearRampToValueAtTime(0.0001, start + DURATION); // fade out
+      rain.connect(filter);
+      filter.connect(rainGain);
+      rainGain.connect(ctx.destination);
+      rain.start(start);
+      rain.stop(start + DURATION);
+
+      // --- Water droplets: quiet falling sine "plips" over the rain bed ---
+      [
+        { at: 0.7, freq: 1200 },
+        { at: 1.4, freq: 900 },
+        { at: 2.1, freq: 1050 }
+      ].forEach(function (drop) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const t = start + drop.at;
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(drop.freq, t);
+        osc.frequency.linearRampToValueAtTime(drop.freq * 0.55, t + 0.15);
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.linearRampToValueAtTime(0.07, t + 0.02);
+        gain.gain.linearRampToValueAtTime(0.0001, t + 0.25);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.3);
+      });
     } catch (e) {
       // Audio is an enhancement; a browser/device audio failure must not stop polling.
     }
@@ -683,27 +725,27 @@
     saveBoothSoundPref();
     renderDayBooth(); // refresh the button label/state in the booth header
     // The click is itself a user gesture, so it can unlock Web Audio and play
-    // the exact same alert buzz — the button doubles as a sound test.
+    // the exact same rain alert — the button doubles as a sound test.
     unlockBoothAudio();
     if (state.audioContext && state.audioContext.state === 'suspended') {
       state.audioContext.resume();
     }
-    buzzBoothAlert();
+    playBoothAlert();
   }
 
   function announceNewBoothEvents(fresh) {
-    let shouldBuzz = false;
+    let shouldAlert = false;
     (fresh || []).forEach(function (event) {
       const key = event && event.key != null ? String(event.key) : '';
       if (!key || state.alertedBoothKeys[key]) return;
       state.alertedBoothKeys[key] = true;
-      // The buzzer is reserved for nullifications: a touchdown, field goal,
+      // The alert sound is reserved for nullifications: a touchdown, field goal,
       // PAT or 2-point conversion wiped out, or points ESPN took off the
       // running score. Ordinary flags, challenges and pending reviews stay
       // silent — they are still listed in the feed.
-      if (boothEventNullified(event)) shouldBuzz = true;
+      if (boothEventNullified(event)) shouldAlert = true;
     });
-    if (shouldBuzz && state.soundEnabled) buzzBoothAlert();
+    if (shouldAlert && state.soundEnabled) playBoothAlert();
   }
 
   function renderDayBooth() {
@@ -850,8 +892,8 @@
 
     const soundOn = !!state.soundEnabled;
     const soundTitle = soundOn
-      ? 'Alert sound ON - buzzes only when a score is nullified. Click to mute.'
-      : 'Alert sound OFF - click to enable and test the alert buzz.';
+      ? 'Alert sound ON - a gentle rain sound plays only when a score is nullified. Click to mute.'
+      : 'Alert sound OFF - click to enable and test the rain alert sound.';
     return '<div class="booth day-booth">' +
       '<div class="booth-head">' +
         '<div class="booth-head-main">' +
