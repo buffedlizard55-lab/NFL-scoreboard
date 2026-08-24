@@ -10,6 +10,9 @@
 
   const SCOREBOARD_URL = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard';
   const SUMMARY_URL = 'https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/summary';
+  // ESPN's compact header feed exposes the live event status, scores, and
+  // last-play situation for the entire league in one response.
+  const LIVE_HEADER_URL = 'https://site.web.api.espn.com/apis/v2/scoreboard/header?sport=football&league=nfl';
   const LIVE_REVIEW_SECONDS = NFLRefresh.LIVE_REVIEWS_INTERVAL_MS / 1000;
   const BOOTH_SOUND_KEY = 'nflBoothSoundEnabled'; // persisted toggle for the booth alert sound
 
@@ -152,6 +155,7 @@
     boothPrimed: false,    // first paint of a game's booth marks history as seen
     daySummaries: {},      // eventId -> { drives, situation, final }
     summaryRequests: {},   // eventId -> { promise, final } for an in-flight fetch
+    liveHeaderRequest: null, // one in-flight league-wide live-score request
     dayFeed: { items: [], primed: false }, // day-wide booth chat feed
     dayBoothNullified: {}, // eventId -> newest booth event's nullification state, for card badges
     dayBoothFilter: 'all', // day-wide booth filter, incl. the 'redzone' cut
@@ -619,6 +623,89 @@
       changed = true;
     }
     return changed;
+  }
+
+  /*
+   * ESPN's live header endpoint does not use the scoreboard's nested
+   * `competition` shape. Adapt only its observed live fields, then share the
+   * guarded summary hydrator above. This keeps the two feeds consistent and
+   * ignores any missing/partial header fields.
+   */
+  function liveHeaderEvents(data) {
+    const out = [];
+    (data && data.sports || []).forEach(function (sport) {
+      (sport && sport.leagues || []).forEach(function (league) {
+        (league && league.events || []).forEach(function (event) { out.push(event); });
+      });
+    });
+    return out;
+  }
+
+  function headerCompetition(event) {
+    if (!event) return null;
+    const full = event.fullStatus || {};
+    return {
+      competitors: (event.competitors || []).map(function (team) {
+        return {
+          homeAway: team.homeAway,
+          score: team.score,
+          winner: team.winner
+        };
+      }),
+      status: full.type ? {
+        type: full.type,
+        displayClock: full.displayClock != null ? full.displayClock : full.clock,
+        period: full.period
+      } : null,
+      situation: event.situation || null,
+      playByPlayAvailable: event.playByPlayAvailable
+    };
+  }
+
+  function refreshLiveScores() {
+    // This endpoint is for ESPN's current live header; it is not a substitute
+    // for browsing an arbitrary historical day, and is skipped when nothing
+    // selected is live.
+    if (!state.events.some(function (ev) { return ev.status && ev.status.state === 'in'; })) return;
+    // A timer tick never starts a second league-wide request while the prior
+    // one is still on the wire. This bounds traffic and prevents an older
+    // response from racing a newer one.
+    if (state.liveHeaderRequest) return;
+    const stamp = toYMD(state.date);
+    const request = fetch(LIVE_HEADER_URL, { cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      });
+    state.liveHeaderRequest = request;
+    request
+      .then(function (data) {
+        if (toYMD(state.date) !== stamp) return;
+        const byId = {};
+        liveHeaderEvents(data).forEach(function (event) {
+          if (event && event.id != null) byId[String(event.id)] = event;
+        });
+        let cardsChanged = false;
+        let openChanged = false;
+        state.events.forEach(function (ev) {
+          const source = byId[String(ev.id)];
+          if (!source) return;
+          const before = eventCardSignature(ev);
+          const competition = headerCompetition(source);
+          if (!competition) return;
+          hydrateEventFromSummary(ev, { header: { competitions: [competition] } });
+          if (eventCardSignature(ev) !== before) {
+            cardsChanged = true;
+            if (current() === ev) openChanged = true;
+          }
+        });
+        if (cardsChanged && !$('scoreboard-view').classList.contains('hidden')) renderScoreboard();
+        if (openChanged && current()) renderGameHeader();
+      })
+      .catch(function () { /* the detail/scoreboard paths remain fallbacks */ })
+      .then(function () {
+        if (state.liveHeaderRequest === request) state.liveHeaderRequest = null;
+      });
   }
 
   function dayBoothGames() {
@@ -1699,6 +1786,7 @@
     if (state.polling) state.polling.stop();
     state.polling = NFLRefresh.start({
       refreshScoreboard: refreshScoreboard,
+      refreshLiveScores: refreshLiveScores,
       refreshReviews: refreshDayBooth,
       isVisible: function () { return document.visibilityState !== 'hidden'; }
     });

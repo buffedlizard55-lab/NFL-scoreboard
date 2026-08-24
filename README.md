@@ -105,15 +105,16 @@ the repository root — no build step:
     passing, rushing, 3rd/4th down, red zone, turnovers, time of possession…).
   - **Player Stats** — passing, rushing, receiving, defense, kicking, punting,
     and return stats per player, with team totals.
-- **Live updates** — the scoreboard endpoint refreshes every 15 seconds, while
-  each live game's detail (play-by-play, flags/reviews, stats, **score, and
-  status**) is checked independently every second in a visible tab. The app
-  immediately hydrates a game card from score/status fields that are present in
-  that already-requested summary response, so a published score does not wait
-  for the next scoreboard poll. Review feeds paint on every completed response;
-  the larger non-review tabs retain their previous 5-second paint cadence to
-  avoid unnecessary DOM churn. Poll requests bypass the browser HTTP cache, and
-  in-flight detail requests are shared instead of duplicated. Finished games
+- **Live updates** — the selected-day scoreboard endpoint refreshes every 15
+  seconds. Separately, while a selected game is live and the tab is visible,
+  the app checks ESPN's league-wide live header and each game's detail every
+  second. The compact header supplies current score/status/situation across
+  the league, while game detail supplies play-by-play, flags/reviews, and
+  stats. Both requests bypass the browser cache and are independently
+  de-duplicated, so a slow play-by-play response cannot hold up score/status
+  painting. Review feeds paint on every completed response; the larger
+  non-review tabs retain their previous 5-second paint cadence to avoid
+  unnecessary DOM churn. Finished games
   receive one final detail snapshot and are then cached for the selected day.
   Returning to a backgrounded tab triggers an immediate refresh. A red
   **LIVE** badge appears whenever a game is live.
@@ -129,6 +130,8 @@ Instead, this app uses **ESPN's public NFL API**, which is free, requires no
 key, and is CORS-enabled (callable directly from a browser):
 
 - Scoreboard: `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=YYYYMMDD`
+- League-wide live header (current score, status, and last-play situation):
+  `https://site.web.api.espn.com/apis/v2/scoreboard/header?sport=football&league=nfl`
 - Game detail (box score, player stats, scoring drives, full play-by-play):
   `https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=<id>`
 
@@ -245,15 +248,16 @@ as a red zone play — the app never guesses.
 
 ## Notes & limits
 
-- This is polling, not real-time push. In a visible tab, the nominal polling
-  interval is 1 second for live game-detail/review data; score/status fields
-  present in those detail responses are painted on that same path. The separate
-  scoreboard endpoint is refreshed every 15 seconds for the day-wide schedule.
-  In-flight requests are not duplicated. Network time, browser scheduling, and
-  ESPN's own update timing are additional and are outside this app's control.
-- The one-second timer attempts up to 60 detail refreshes per minute for each
-  live game. A tick is skipped when that game's previous request is still in
-  flight; initial-load and tab-resume refreshes are separate.
+- This is polling, not real-time push. In a visible tab, the nominal interval
+  is 1 second for the league-wide live-header score/status feed and for each
+  live game's detail/review feed. The separate selected-day scoreboard endpoint
+  is refreshed every 15 seconds. In-flight requests are not duplicated. Network
+  time, browser scheduling, and ESPN's own update timing are additional and are
+  outside this app's control.
+- The one-second timer attempts up to 60 header refreshes per minute plus up to
+  60 detail refreshes per live game per minute. A tick is skipped when that
+  request's previous fetch is still in flight; initial-load and tab-resume
+  refreshes are separate.
 - Preseason games sometimes have `playByPlayAvailable: false`; the app shows a
   friendly "not available" message rather than erroring.
 - The day-wide booth chat does not invent per-play timestamps: plays are

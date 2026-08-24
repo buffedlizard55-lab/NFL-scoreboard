@@ -15,8 +15,10 @@ function harness(visible) {
   const cleared = [];
   let scoreCalls = 0;
   let reviewCalls = 0;
+  let liveScoreCalls = 0;
   const polling = NFLRefresh.start({
     refreshScoreboard: function () { scoreCalls += 1; },
+    refreshLiveScores: function () { liveScoreCalls += 1; },
     refreshReviews: function () { reviewCalls += 1; },
     isVisible: function () { return visible.value; },
     setInterval: function (callback, ms) {
@@ -31,6 +33,7 @@ function harness(visible) {
     scheduled: scheduled,
     cleared: cleared,
     scoreCalls: function () { return scoreCalls; },
+    liveScoreCalls: function () { return liveScoreCalls; },
     reviewCalls: function () { return reviewCalls; }
   };
 }
@@ -62,6 +65,7 @@ ok('schedules score and review callbacks independently', function () {
 
   h.scheduled[1].callback();
   assert.strictEqual(h.scoreCalls(), 1);
+  assert.strictEqual(h.liveScoreCalls(), 1);
   assert.strictEqual(h.reviewCalls(), 1);
   h.polling.stop();
 });
@@ -73,11 +77,13 @@ ok('does not poll while hidden and refreshes both streams on demand when visible
   h.scheduled.forEach(function (timer) { timer.callback(); });
   h.polling.refreshNow();
   assert.strictEqual(h.scoreCalls(), 0);
+  assert.strictEqual(h.liveScoreCalls(), 0);
   assert.strictEqual(h.reviewCalls(), 0);
 
   visible.value = true;
   h.polling.refreshNow();
   assert.strictEqual(h.scoreCalls(), 1);
+  assert.strictEqual(h.liveScoreCalls(), 1);
   assert.strictEqual(h.reviewCalls(), 1);
   h.polling.stop();
 });

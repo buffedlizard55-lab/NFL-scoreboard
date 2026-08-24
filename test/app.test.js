@@ -328,6 +328,30 @@ async function run() {
     fetch: function (url, options) {
       fetches.push(url);
       fetchOptions.push(options);
+      if (url.indexOf('/scoreboard/header') !== -1) {
+        // Observed header-feed shape: event id, flat competitors, fullStatus,
+        // situation and play-by-play availability. Keep it derived from the
+        // existing live fixtures so every one-second tick is deterministic.
+        function headerEvent(event) {
+          const comp = event.competitions[0];
+          return {
+            id: event.id,
+            competitors: comp.competitors.map(function (team) {
+              return { homeAway: team.homeAway, score: team.score, winner: team.winner };
+            }),
+            fullStatus: {
+              displayClock: comp.status.displayClock,
+              period: comp.status.period,
+              type: comp.status.type
+            },
+            situation: comp.situation,
+            playByPlayAvailable: comp.playByPlayAvailable
+          };
+        }
+        return Promise.resolve(response({
+          sports: [{ leagues: [{ events: [headerEvent(liveEvent), headerEvent(secondEvent)] }] }]
+        }));
+      }
       if (url.indexOf('/scoreboard') !== -1) {
         // Only the next day serves the two-game scoreboard; every other day
         // keeps the original single-game scenario above.
@@ -367,7 +391,7 @@ async function run() {
   await flush();
 
   assert.deepStrictEqual(timers.map(function (timer) { return timer.ms; }), [15000, 1000]);
-  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/scoreboard') !== -1; }).length, 1);
+  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/sports/football/nfl/scoreboard') !== -1; }).length, 1);
   assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/summary') !== -1; }).length, 1);
   assert.ok(fetchOptions.every(function (options) { return options && options.cache === 'no-store'; }));
   assert.ok(elements['day-booth'].innerHTML.indexOf('Play under review.') !== -1);
@@ -401,9 +425,9 @@ async function run() {
   assert.strictEqual(elements['scoreboard-view'].innerHTML.indexOf('PTS AT RISK'), -1);
   const scoreboardWritesBeforeResolution = elements['scoreboard-view'].innerHTMLWrites();
 
-  // A score that arrives in the already-requested summary is painted on this
-  // one-second detail path; it does not wait for the 15-second scoreboard
-  // request. The next request is held to preserve the dedupe check below.
+  // A score from the live header is painted on the one-second path; it does
+  // not wait for the 15-second scoreboard request. The detail request below
+  // is held separately to preserve the dedupe check.
   competition.competitors.find(function (c) { return c.homeAway === 'away'; }).score = '23';
   // Two review ticks while one detail request is pending still create one fetch.
   holdSummaries = true;
@@ -427,17 +451,20 @@ async function run() {
   await flush();
   assert.ok(elements['day-booth'].innerHTML.indexOf('play was REVERSED') !== -1);
   assert.ok(elements['scoreboard-view'].innerHTML.indexOf('team-score">23</div>') !== -1,
-    'summary score is painted by the one-second detail response');
+    'live score is painted by the one-second header response');
   assert.strictEqual(elements['scoreboard-view'].innerHTMLWrites(),
-    scoreboardWritesBeforeResolution + 1); // REVIEW badge was removed
+    scoreboardWritesBeforeResolution + 2); // score update + REVIEW badge removal
 
   // Returning to a visible tab requests both streams immediately.
   assert.strictEqual(typeof documentListeners.visibilitychange, 'function');
-  const scoresBefore = fetches.filter(function (url) { return url.indexOf('/scoreboard') !== -1; }).length;
+  const scoresBefore = fetches.filter(function (url) { return url.indexOf('/sports/football/nfl/scoreboard') !== -1; }).length;
+  const headersBefore = fetches.filter(function (url) { return url.indexOf('/scoreboard/header') !== -1; }).length;
   const summariesBefore = fetches.filter(function (url) { return url.indexOf('/summary') !== -1; }).length;
   documentListeners.visibilitychange();
-  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/scoreboard') !== -1; }).length,
+  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/sports/football/nfl/scoreboard') !== -1; }).length,
     scoresBefore + 1);
+  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/scoreboard/header') !== -1; }).length,
+    headersBefore + 1);
   assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/summary') !== -1; }).length,
     summariesBefore + 1);
   pendingSummaries.shift()();
