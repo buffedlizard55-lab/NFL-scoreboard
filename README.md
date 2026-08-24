@@ -199,8 +199,9 @@ only the per-play running scores already returned by ESPN
 (`awayScore` / `homeScore`). A decrease is accepted as a removal only when the
 booth event can be the ruling that caused it: a scoring/nullification play, a
 review/challenge/replay, or a standalone penalty correction immediately tied
-to the scoring play. This causal check matters during live games because ESPN
-can briefly attach a stale lower score to the ensuing kickoff. A routine
+to the scoring play. This causal check also prevents a stale or malformed
+lower per-play score on the ensuing kickoff from being mistaken for an
+officials' ruling. A routine
 kickoff, punt, or return foul cannot erase the preceding score and is never
 promoted to a nullification from that feed glitch.
 

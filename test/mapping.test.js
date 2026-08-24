@@ -609,9 +609,10 @@ ok('boothEventContext: a flag on the ensuing kickoff is not a nullification', fu
 
 ok('boothEventContext: SEA-TEN kickoff holding cannot nullify the preceding 7 points', function () {
   // Exact play ordering and relevant API fields from ESPN event 401873297,
-  // SEA @ TEN on 2026-08-23. The live API ultimately published 7-0 on every
-  // entry. A live tick can briefly attach the old 0-0 total to the kickoff;
-  // that feed correction must not be treated as an officials' score ruling.
+  // SEA @ TEN on 2026-08-23. The published snapshot had 7-0 on every entry.
+  // The test deliberately supplies 0-0 on the kickoff as a defensive
+  // malformed-live-data case; that lower value must not be treated as an
+  // officials' score ruling.
   const plays = [
     { id: '401873297252', sequenceNumber: '25200',
       type: { id: '67', text: 'Passing Touchdown' },
@@ -627,7 +628,7 @@ ok('boothEventContext: SEA-TEN kickoff holding cannot nullify the preceding 7 po
       text: 'J.Myers kicks 67 yards from SEA 35 to TEN -2. M.Carter pushed ob at ' +
         'TEN 20 for 22 yards (M.Foster).PENALTY on TEN-X.Restrepo, Offensive ' +
         'Holding, 10 yards, enforced at TEN 20.',
-      // Deliberately model the transient bad score that caused the false alert.
+      // Deliberately model a malformed lower live score.
       awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: true,
       penalty: { yards: 10, type: { text: 'Offensive Holding' },
         status: { text: 'Accepted' } } },
