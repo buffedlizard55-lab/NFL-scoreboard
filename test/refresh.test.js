@@ -46,10 +46,13 @@ ok('exports the documented 15-second board, 250ms live-score, and 1-second revie
   assert.strictEqual(NFLRefresh.LIVE_REVIEWS_INTERVAL_MS, 1000);
 });
 
-ok('renders booth and red zone responses immediately while limiting non-review DOM paints to 5 seconds', function () {
+ok('renders every focused scoring-ruling category immediately while limiting larger DOM paints to 5 seconds', function () {
   assert.strictEqual(NFLRefresh.NON_REVIEW_RENDER_INTERVAL_MS, 5000);
-  assert.strictEqual(NFLRefresh.shouldRenderGameContent('booth', 10000, 10001), true);
-  assert.strictEqual(NFLRefresh.shouldRenderGameContent('redzone', 10000, 10001), true);
+  ['flags', 'challenges', 'replay', 'review', 'nullified', 'redzone', 'integrity'].forEach(function (tab) {
+    assert.strictEqual(NFLRefresh.shouldRenderGameContent(tab, 10000, 10001), true, tab);
+  });
+  assert.strictEqual(NFLRefresh.shouldRenderGameContent('booth', 10000, 10001), false,
+    'the removed combined booth view is not a special refresh path');
   assert.strictEqual(NFLRefresh.shouldRenderGameContent('plays', 10000, 14999), false);
   assert.strictEqual(NFLRefresh.shouldRenderGameContent('players', 10000, 15000), true);
   assert.strictEqual(NFLRefresh.shouldRenderGameContent('team', 0, 10000), true);

@@ -67,12 +67,17 @@ async function run() {
   competition.status.type.shortDetail = 'Q2 10:00';
   competition.status.displayClock = '10:00';
   competition.status.period = 2;
+  // This starts as a scoring review. The fixture later changes this same
+  // source play id to a reversal, exercising the pending -> nullified alert
+  // transition without inventing a second notification identity.
   competition.situation = {
     lastPlay: {
-      id: '4018732869005',
-      sequenceNumber: '8400',
+      id: 'rev-2',
+      sequenceNumber: '9100100',
       text: 'Play under review.',
       type: { text: 'Pass Reception' },
+      awayScore: 0,
+      homeScore: 7,
       period: { number: 2 },
       clock: { displayValue: '10:00' }
     }
@@ -182,8 +187,9 @@ async function run() {
   // linked to the live scoreboard competition so detail-response hydration is
   // exercised alongside the one-second booth refresh.
   summary.header = { competitions: [competition] };
-  // Add an API-shaped reversed-TD sequence so the booth smoke test also
-  // exercises the new before/during/after + points-removed rendering.
+  // Add an API-shaped TD-under-review sequence. The same review row is
+  // changed to a reversal later, so the smoke test covers an evidence-based
+  // pending -> nullified transition.
   summary.drives.previous.push({
     id: 'reversed-td-drive',
     description: 'fixture: reversed touchdown',
@@ -193,25 +199,15 @@ async function run() {
     team: { abbreviation: 'HOU', displayName: 'Houston Texans', logos: [] },
     plays: [
       {
-        id: 'rev-1', sequenceNumber: '1000', type: { text: 'Rush' },
+        id: 'rev-1', sequenceNumber: '9100000', type: { text: 'Rush' },
         text: 'J.Banks 2 yard run, TOUCHDOWN.', awayScore: 0, homeScore: 7,
         scoringPlay: true, isPenalty: false
       },
       {
-        id: 'rev-2', sequenceNumber: '1100', type: { text: 'Pass Reception' },
+        id: 'rev-2', sequenceNumber: '9100100', type: { text: 'Pass Reception' },
         text: 'Play under review.', awayScore: 0, homeScore: 7,
         scoringPlay: false, isPenalty: false
       },
-      {
-        id: 'rev-3', sequenceNumber: '1200', type: { text: 'Replay Review' },
-        text: 'The replay official reviewed the ruling, and the play was REVERSED. Runner short of the goal line.',
-        awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false
-      },
-      {
-        id: 'rev-4', sequenceNumber: '1300', type: { text: 'Rush' },
-        text: 'J.Banks left tackle for no gain.', awayScore: 0, homeScore: 0,
-        scoringPlay: false, isPenalty: false
-      }
     ]
   });
   // A touchdown wiped out by an accepted foul, in ESPN's published wording
@@ -250,6 +246,11 @@ async function run() {
   // alert plays a noise-buffer "rain bed" plus sine-oscillator "droplets",
   // so both node types are counted.
   const audio = { oscillatorCount: 0, noiseSourceCount: 0 };
+  const notifications = [];
+  function FakeNotification(title, options) {
+    notifications.push({ title: title, options: options });
+  }
+  FakeNotification.permission = 'granted';
   function fakeOscillator() {
     audio.oscillatorCount += 1;
     return {
@@ -325,6 +326,7 @@ async function run() {
     console: console,
     document: document,
     AudioContext: FakeAudioContext,
+    Notification: FakeNotification,
     fetch: function (url, options) {
       fetches.push(url);
       fetchOptions.push(options);
@@ -390,438 +392,352 @@ async function run() {
   await flush();
   await flush();
 
-  assert.deepStrictEqual(timers.map(function (timer) { return timer.ms; }), [15000, 250, 1000]);
-  const scoreboardTimer = timers.find(function (timer) { return timer.ms === 15000; });
-  const liveScoreTimer = timers.find(function (timer) { return timer.ms === 250; });
-  const reviewTimer = timers.find(function (timer) { return timer.ms === 1000; });
-  assert.ok(scoreboardTimer && liveScoreTimer && reviewTimer);
-  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/sports/football/nfl/scoreboard') !== -1; }).length, 1);
-  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/summary') !== -1; }).length, 1);
-  assert.ok(fetchOptions.every(function (options) { return options && options.cache === 'no-store'; }));
-  assert.ok(elements['day-booth'].innerHTML.indexOf('Play under review.') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('score/status 0.25s · play-by-play 1s') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('booth-state') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('bsh-label') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('Score') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('booth-state removed') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('badge removed') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('booth-note') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('Banks 2 yard run, TOUCHDOWN') !== -1);
-  // The fixture's red-zone false start (HOU 19) carries the RZ badge in the
-  // day feed; its non-red-zone counterpart (LV 25) does not.
-  assert.ok(elements['day-booth'].innerHTML.indexOf('badge rz') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('enforced at HST 19') !== -1);
-  // Nullified scores: the wiped touchdown is highlighted in the day feed, is
-  // filterable, and is badged on the game card. Nothing is reported for the
-  // ordinary flags and pending reviews around it.
-  assert.ok(elements['day-booth'].innerHTML.indexOf('badge removed') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('TOUCHDOWN NULLIFIED by Penalty') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('data-day-filter="nullified"') !== -1);
-  assert.strictEqual(elements['day-booth'].innerHTML.indexOf('PTS AT RISK'), -1);
-  assert.strictEqual(elements['day-booth'].innerHTML.indexOf('data-day-filter="risk"'), -1);
-  // The all-games booth also exposes the per-game Red Zone cut as a filter
-  // chip, restricted to nullified scores. The feed holds two red-zone booth
-  // events — the false start enforced at HST 19 and the nullified red-zone
-  // touchdown — but only the nullified one counts.
-  assert.ok(elements['day-booth'].innerHTML.indexOf('data-day-filter="redzone"') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('Red zone · 1') !== -1);
-  assert.ok(elements['scoreboard-view'].innerHTML.indexOf('>NULLIFIED<') !== -1);
-  assert.strictEqual(elements['scoreboard-view'].innerHTML.indexOf('PTS AT RISK'), -1);
-  // The 250ms score timer does not overlap a pending league-header request.
-  const headersBeforeFastTicks = fetches.filter(function (url) { return url.indexOf('/scoreboard/header') !== -1; }).length;
-  liveScoreTimer.callback();
-  liveScoreTimer.callback();
-  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/scoreboard/header') !== -1; }).length,
-    headersBeforeFastTicks + 1);
-  await flush();
-  liveScoreTimer.callback();
-  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/scoreboard/header') !== -1; }).length,
-    headersBeforeFastTicks + 2);
-  await flush();
-  const scoreboardWritesBeforeResolution = elements['scoreboard-view'].innerHTMLWrites();
-
-  // A score from the live header is painted on the 250ms path; it does not
-  // wait for either the 15-second scoreboard or the one-second detail poll.
-  competition.competitors.find(function (c) { return c.homeAway === 'away'; }).score = '23';
-  liveScoreTimer.callback();
-  await flush();
-  assert.ok(elements['scoreboard-view'].innerHTML.indexOf('team-score">23</div>') !== -1,
-    'live score is painted by the 250ms header response');
-  assert.strictEqual(elements['scoreboard-view'].innerHTMLWrites(), scoreboardWritesBeforeResolution + 1);
-  // Two review ticks while one detail request is pending still create one fetch.
-  holdSummaries = true;
-  reviewTimer.callback();
-  reviewTimer.callback();
-  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/summary') !== -1; }).length, 2);
-  assert.strictEqual(pendingSummaries.length, 1);
-  assert.strictEqual(elements['scoreboard-view'].innerHTMLWrites(), scoreboardWritesBeforeResolution + 1);
-  summary.header.competitions[0].situation = {
-    lastPlay: {
-      id: '4018732869005',
-      sequenceNumber: '8400',
-      text: 'The replay official reviewed the ruling, and the play was REVERSED.',
-      type: { text: 'Replay Review' },
-      period: { number: 2 },
-      clock: { displayValue: '10:00' }
-    }
-  };
-  pendingSummaries.shift()();
-  await flush();
-  await flush();
-  assert.ok(elements['day-booth'].innerHTML.indexOf('play was REVERSED') !== -1);
-  assert.ok(elements['scoreboard-view'].innerHTML.indexOf('team-score">23</div>') !== -1,
-    'live score remains painted after the detail response');
-  assert.strictEqual(elements['scoreboard-view'].innerHTMLWrites(),
-    scoreboardWritesBeforeResolution + 2); // score update + REVIEW badge removal
-
-  // Returning to a visible tab requests both streams immediately.
-  assert.strictEqual(typeof documentListeners.visibilitychange, 'function');
-  const scoresBefore = fetches.filter(function (url) { return url.indexOf('/sports/football/nfl/scoreboard') !== -1; }).length;
-  const headersBefore = fetches.filter(function (url) { return url.indexOf('/scoreboard/header') !== -1; }).length;
-  const summariesBefore = fetches.filter(function (url) { return url.indexOf('/summary') !== -1; }).length;
-  documentListeners.visibilitychange();
-  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/sports/football/nfl/scoreboard') !== -1; }).length,
-    scoresBefore + 1);
-  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/scoreboard/header') !== -1; }).length,
-    headersBefore + 1);
-  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/summary') !== -1; }).length,
-    summariesBefore + 1);
-  pendingSummaries.shift()();
-  await flush();
-
-  // A live-to-final transition gets one final snapshot, then uses that cache.
-  competition.status.type.state = 'post';
-  competition.status.type.completed = true;
-  competition.status.type.shortDetail = 'Final';
-  scoreboardTimer.callback();
-  await flush();
-  await flush();
-  const beforeFinal = fetches.filter(function (url) { return url.indexOf('/summary') !== -1; }).length;
-  reviewTimer.callback();
-  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/summary') !== -1; }).length,
-    beforeFinal + 1);
-  pendingSummaries.shift()();
-  await flush();
-  await flush();
-  const dayWritesAfterFinal = elements['day-booth'].innerHTMLWrites();
-  reviewTimer.callback();
-  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/summary') !== -1; }).length,
-    beforeFinal + 1);
-  assert.strictEqual(elements['day-booth'].innerHTMLWrites(), dayWritesAfterFinal);
-  assert.ok(fetchOptions.every(function (options) { return options && options.cache === 'no-store'; }));
-
-  // Booth sound button: renders in the all-games booth, defaults ON, and
-  // clicking it toggles the label and plays the same rain alert sound.
-  function clickSoundButton() {
-    elements['day-booth'].dispatch('click', {
-      target: {
-        closest: function (selector) {
-          return selector === '.day-sound-btn' ? {} : null;
-        }
-      }
-    });
+  async function settle(times) {
+    for (let i = 0; i < (times || 3); i += 1) await flush();
   }
-  assert.ok(elements['day-booth'].innerHTML.indexOf('day-sound-btn') !== -1);
-  assert.ok(elements['day-booth'].innerHTML.indexOf('&#128276; Sound On') !== -1);
-  assert.strictEqual(audio.oscillatorCount, 0, 'no audio before the sound button is used');
-  assert.strictEqual(audio.noiseSourceCount, 0, 'no rain bed before the sound button is used');
-  clickSoundButton();
-  await flush();
-  assert.strictEqual(elements['day-booth'].innerHTML.indexOf('&#128263; Sound Off') !== -1, true);
-  assert.ok(audio.oscillatorCount > 0, 'clicking the sound button plays the rain alert droplets');
-  assert.ok(audio.noiseSourceCount > 0, 'clicking the sound button plays the rain alert noise bed');
-  clickSoundButton();
-  await flush();
-  assert.ok(elements['day-booth'].innerHTML.indexOf('&#128276; Sound On') !== -1);
-  assert.ok(audio.oscillatorCount > 1, 're-enabling the sound plays the preview rain alert again');
 
-  // The alert is reserved for nullified scores. A newly discovered ordinary
-  // flag — even one right after a touchdown, which the removed "points at
-  // risk" feature used to alert for — is listed silently. (The game flips
-  // back to live for this: one scoreboard tick re-reads its status, and the
-  // next booth tick re-fetches its detail, resetting the cached final flag.)
-  competition.status.type.state = 'in';
-  competition.status.type.completed = false;
-  scoreboardTimer.callback(); // scoreboard refresh re-summarizes the game as live
-  await flush();
-  await flush();
-  const oscillatorsBeforeFlag = audio.oscillatorCount;
-  summary.drives.previous.push({
-    id: 'plain-penalty-drive',
-    description: 'fixture: ordinary flag after a touchdown',
-    result: 'No Play',
-    displayResult: 'No Play',
-    isScore: false,
-    team: { abbreviation: 'LV', displayName: 'Las Vegas Raiders', logos: [] },
-    plays: [
-      {
-        id: 'flagp-1', sequenceNumber: '9500000', type: { text: 'Rush' },
-        text: 'A.Okafor left end for 4 yards, TOUCHDOWN.', awayScore: 30, homeScore: 20,
-        scoringPlay: true, isPenalty: false
-      },
-      {
-        id: 'flagp-2', sequenceNumber: '9500100', type: { text: 'Penalty' },
-        text: 'PENALTY on LV-R.Jones, Offensive Holding, 10 yards, enforced at LV 16 - No Play.',
-        awayScore: 30, homeScore: 20,
-        scoringPlay: false, isPenalty: true,
-        penalty: { yards: 10, type: { text: 'Offensive Holding' } }
-      }
-    ]
-  });
-  reviewTimer.callback();
-  assert.strictEqual(pendingSummaries.length, 1);
-  pendingSummaries.shift()();
-  await flush();
-  await flush();
-  assert.ok(elements['day-booth'].innerHTML.indexOf('R.Jones') !== -1,
-    'the ordinary flag is still listed in the feed');
-  assert.strictEqual(audio.oscillatorCount, oscillatorsBeforeFlag,
-    'an ordinary flag does not play the alert sound');
-
-  // A newly discovered nullification does alert. ESPN publishes the score
-  // drop here (30-20 back to 24-20 after the reversal), so this exercises
-  // the running-score signal rather than the wording.
-  summary.drives.previous.push({
-    id: 'nullified-alert-drive',
-    description: 'fixture: touchdown reversed on review',
-    result: 'No Play',
-    displayResult: 'No Play',
-    isScore: false,
-    team: { abbreviation: 'LV', displayName: 'Las Vegas Raiders', logos: [] },
-    plays: [
-      {
-        id: 'nullp-1', sequenceNumber: '9600000', type: { text: 'Pass Reception' },
-        text: 'A.Meyers pass deep right for 22 yards, TOUCHDOWN.', awayScore: 30, homeScore: 20,
-        scoringPlay: true, isPenalty: false
-      },
-      {
-        id: 'nullp-2', sequenceNumber: '9600100', type: { text: 'Replay Review' },
-        text: 'The Replay Official reviewed the pass completion ruling, and the play was REVERSED.',
-        awayScore: 24, homeScore: 20,
-        scoringPlay: false, isPenalty: false
-      }
-    ]
-  });
-  reviewTimer.callback();
-  assert.strictEqual(pendingSummaries.length, 1);
-  pendingSummaries.shift()();
-  await flush();
-  await flush();
-  assert.ok(elements['day-booth'].innerHTML.indexOf('the play was REVERSED') !== -1);
-  assert.ok(audio.oscillatorCount > oscillatorsBeforeFlag,
-    'a nullified score plays the rain alert sound');
-
-  // The all-games booth's Red zone filter: the per-game Red Zone tab cut
-  // applied across the whole day feed — only booth events whose play started
-  // in the opponent's 20 or inside remain.
-  function clickDayFilter(value) {
-    elements['day-booth'].dispatch('click', {
+  function clickGameCard(id) {
+    elements['scoreboard-view'].dispatch('click', {
       target: {
         closest: function (selector) {
-          if (selector === '.day-sound-btn') return null;
-          if (selector === '.day-filter') {
-            return { getAttribute: function () { return value; } };
+          if (selector === '.day-chip') return null;
+          if (selector === '.game-card') {
+            return { getAttribute: function () { return id; } };
           }
           return null;
         }
       }
     });
   }
-  clickDayFilter('redzone');
-  const dayRz = elements['day-booth'].innerHTML;
-  assert.ok(dayRz.indexOf(
-    'class="booth-filter day-filter active" data-day-filter="redzone"') !== -1);
-  // The red-zone false start (enforced at HST 19) does not remove points,
-  // so it is excluded; nothing shows for this filter.
-  assert.strictEqual(dayRz.indexOf('enforced at HST 19'), -1);
-  // …while every booth event from farther out is hidden: the LV 25 false
-  // start, the HOU challenge, and the under-review entries.
-  assert.ok(dayRz.indexOf('enforced at LV 25') === -1);
-  assert.ok(dayRz.indexOf('Houston challenged') === -1);
-  assert.ok(dayRz.indexOf('Play under review') === -1);
 
-  // Clicking a message while the Red zone filter is active opens that game
-  // straight into its own Red Zone tab.
+  function clickGameTab(tab) {
+    elements.tabs.dispatch('click', {
+      target: {
+        closest: function (selector) {
+          return selector === '.tab'
+            ? { getAttribute: function () { return tab; } }
+            : null;
+        }
+      }
+    });
+  }
+
+  function clickDayTab(tab) {
+    elements['day-booth'].dispatch('click', {
+      target: {
+        closest: function (selector) {
+          if (selector === '.day-sound-btn') return null;
+          if (selector === '.day-watch-tab') {
+            return { getAttribute: function () { return tab; } };
+          }
+          return null;
+        }
+      }
+    });
+  }
+
+  assert.deepStrictEqual(timers.map(function (timer) { return timer.ms; }), [15000, 250, 1000]);
+  const liveScoreTimer = timers.find(function (timer) { return timer.ms === 250; });
+  const reviewTimer = timers.find(function (timer) { return timer.ms === 1000; });
+  assert.ok(liveScoreTimer && reviewTimer);
+  assert.strictEqual(fetches.filter(function (url) {
+    return url.indexOf('/sports/football/nfl/scoreboard') !== -1;
+  }).length, 1);
+  assert.strictEqual(fetches.filter(function (url) { return url.indexOf('/summary') !== -1; }).length, 1);
+  assert.ok(fetchOptions.every(function (options) { return options && options.cache === 'no-store'; }));
+
+  // The all-games panel is deliberately a live, confirmed-outcome stream.
+  // The fixture contains both a scoring-linked pending review and confirmed
+  // nullified touchdowns; only the latter may appear here.
+  const initialWatch = elements['day-booth'].innerHTML;
+  assert.ok(initialWatch.indexOf('Confirmed nullified scoring plays') !== -1);
+  assert.ok(initialWatch.indexOf('LIVE PROVIDER: ESPN GAMECAST') !== -1);
+  assert.ok(initialWatch.indexOf('Field verification &amp; limits') !== -1);
+  assert.ok(initialWatch.indexOf('fast last-play header 0.25s attempted') !== -1);
+  assert.ok(initialWatch.indexOf('TOUCHDOWN NULLIFIED by Penalty') !== -1);
+  assert.ok(initialWatch.indexOf('data-day-tab="nullified"') !== -1);
+  assert.ok(initialWatch.indexOf('data-day-tab="integrity"') !== -1);
+  assert.ok(initialWatch.indexOf('data-day-filter') === -1,
+    'the former mixed-status all-games filter is gone');
+  assert.strictEqual(initialWatch.indexOf('Play under review.'), -1);
+  assert.strictEqual(initialWatch.indexOf('>POTENTIAL<'), -1);
+  assert.strictEqual(initialWatch.indexOf('>NO ROLLBACK<'), -1);
+  assert.strictEqual(initialWatch.indexOf('>DATA CHECK<'), -1);
+  assert.strictEqual(initialWatch.indexOf('enforced at HST 19'), -1,
+    'unrelated flags do not leak into a scoring-nullification stream');
+  assert.strictEqual(initialWatch.indexOf('enforced at LV 25'), -1);
+  assert.ok(initialWatch.indexOf('data-ruling-tab="nullified"') !== -1);
+  assert.ok(initialWatch.indexOf('data-ruling-tab="redzone"') !== -1,
+    'red-zone nullifications retain a direct route to their own game view');
+  assert.ok(elements['scoreboard-view'].innerHTML.indexOf('>NULLIFIED<') !== -1);
+  assert.strictEqual(notifications.length, 0,
+    'initial history and a pending source record never generate desktop notifications');
+
+  // Each scoring-linked ruling classification has an independent game tab.
+  // First open the game while the source still calls rev-2 "under review".
+  clickGameCard('401873286');
+  await settle();
+  const tabs = elements.tabs.innerHTML;
+  ['flags', 'challenges', 'replay', 'review', 'nullified', 'redzone', 'integrity'].forEach(function (tab) {
+    assert.ok(tabs.indexOf('data-tab="' + tab + '"') !== -1, tab + ' tab is present');
+  });
+  assert.strictEqual(tabs.indexOf('data-tab="booth"'), -1,
+    'the combined Scoring rulings tab has been removed');
+
+  clickGameTab('review');
+  let category = elements['game-content'].innerHTML;
+  assert.ok(category.indexOf('Scoring plays under review') !== -1);
+  assert.ok(category.indexOf('Play under review.') !== -1);
+  assert.ok(category.indexOf('>POTENTIAL<') !== -1,
+    'potential tracking remains available in the dedicated under-review view');
+  assert.strictEqual(category.indexOf('TOUCHDOWN NULLIFIED by Penalty'), -1);
+
+  clickGameTab('flags');
+  category = elements['game-content'].innerHTML;
+  assert.ok(category.indexOf('Scoring-linked flags') !== -1);
+  assert.ok(category.indexOf('TOUCHDOWN NULLIFIED by Penalty') !== -1);
+  assert.strictEqual(category.indexOf('enforced at LV 25'), -1,
+    'the flags tab is still scoring-linked, not a broad flag ledger');
+
+  clickGameTab('challenges');
+  category = elements['game-content'].innerHTML;
+  assert.ok(category.indexOf('Scoring-linked challenges') !== -1);
+  assert.ok(category.indexOf('No scoring-linked challenges') !== -1,
+    'an unrelated challenge is not promoted into the scoring feed');
+
+  clickGameTab('replay');
+  category = elements['game-content'].innerHTML;
+  assert.ok(category.indexOf('Scoring-linked replay') !== -1);
+  assert.ok(category.indexOf('No scoring-linked replay') !== -1,
+    'an unrelated replay is not promoted into the scoring feed');
+
+  clickGameTab('nullified');
+  category = elements['game-content'].innerHTML;
+  assert.ok(category.indexOf('Nullified scoring plays') !== -1);
+  assert.ok(category.indexOf('TOUCHDOWN NULLIFIED by Penalty') !== -1);
+  assert.strictEqual(category.indexOf('>POTENTIAL<'), -1);
+  assert.strictEqual(category.indexOf('>NO ROLLBACK<'), -1);
+  assert.strictEqual(category.indexOf('>DATA CHECK<'), -1);
+
+  clickGameTab('redzone');
+  category = elements['game-content'].innerHTML;
+  assert.ok(category.indexOf('Red zone nullified scores') !== -1);
+  assert.ok(category.indexOf('enforced at HST 14') !== -1);
+  assert.ok(category.indexOf('1 NULLIFIED IN RZ') !== -1);
+  assert.strictEqual(category.indexOf('enforced at HST 19'), -1);
+
+  clickGameTab('integrity');
+  category = elements['game-content'].innerHTML;
+  assert.ok(category.indexOf('Source data checks') !== -1);
+  assert.strictEqual(category.indexOf('TOUCHDOWN NULLIFIED by Penalty'), -1,
+    'the data-check category does not infer or duplicate a nullification');
+
+  // A fast-header pending observation remains silent and out of the
+  // all-games outcome stream. The focused ruling tab receives it immediately.
+  clickGameTab('review');
+  assert.strictEqual(typeof documentListeners.click, 'function');
+  documentListeners.click({});
+  assert.strictEqual(audio.oscillatorCount, 0, 'unlocking audio is not an alert');
+  liveScoreTimer.callback();
+  await settle();
+  assert.ok(elements['game-content'].innerHTML.indexOf('>POTENTIAL<') !== -1,
+    'the 250ms header keeps potential tracking current in its category');
+  assert.strictEqual(elements['day-booth'].innerHTML.indexOf('>POTENTIAL<'), -1,
+    'the all-games feed never exposes an unresolved potential');
+  assert.strictEqual(notifications.length, 0);
+
+  // The same source play now has a provider-published replay verdict. That is
+  // the first time it can enter the all-games feed and alert exactly once.
+  const pendingReview = summary.drives.previous
+    .find(function (drive) { return drive.id === 'reversed-td-drive'; }).plays[1];
+  const reversalText = 'The replay official reviewed the scoring ruling, and the play was REVERSED.';
+  competition.situation = {
+    lastPlay: {
+      id: 'rev-2', sequenceNumber: '9100100', text: reversalText,
+      type: { text: 'Replay Review' }, awayScore: 0, homeScore: 7,
+      period: { number: 2 }, clock: { displayValue: '10:00' }
+    }
+  };
+  const soundBeforeVerdict = audio.oscillatorCount;
+  liveScoreTimer.callback();
+  await settle();
+  assert.ok(elements['day-booth'].innerHTML.indexOf('play was REVERSED') !== -1,
+    'the fast header puts a confirmed verdict in the all-games feed');
+  assert.ok(elements['day-booth'].innerHTML.indexOf('source-lane') !== -1,
+    'the all-games row makes the fast observation transparent');
+  assert.strictEqual(elements['day-booth'].innerHTML.indexOf('>POTENTIAL<'), -1);
+  assert.ok(audio.oscillatorCount > soundBeforeVerdict,
+    'only the confirmed scoring nullification plays sound');
+  assert.strictEqual(notifications.length, 1,
+    'only the confirmed scoring nullification creates a desktop notification');
+  assert.strictEqual(notifications[0].title, 'NFL scoring play nullified');
+  const soundAfterVerdict = audio.oscillatorCount;
+  liveScoreTimer.callback();
+  await settle();
+  assert.strictEqual(audio.oscillatorCount, soundAfterVerdict,
+    'an unchanged verdict cannot alert twice');
+  assert.strictEqual(notifications.length, 1);
+
+  // Reconciliation on the full play-by-play lane cannot duplicate the alert.
+  pendingReview.type = { text: 'Replay Review' };
+  pendingReview.text = reversalText;
+  summary.header.competitions[0].situation = competition.situation;
+  reviewTimer.callback();
+  await settle();
+  assert.ok(elements['day-booth'].innerHTML.indexOf('play was REVERSED') !== -1);
+  assert.strictEqual(audio.oscillatorCount, soundAfterVerdict);
+  assert.strictEqual(notifications.length, 1);
+
+  // Add a source-supported retained scoring flag and an unrelated score drop.
+  // The former belongs only in Flags; the latter belongs only in Data checks.
+  summary.drives.previous.push({
+    id: 'retained-score-flag', team: { abbreviation: 'LV', displayName: 'Las Vegas Raiders', logos: [] },
+    plays: [
+      { id: 'retained-1', sequenceNumber: '9500000', type: { text: 'Rush' },
+        text: 'A.Okafor left end for 4 yards, TOUCHDOWN.', awayScore: 30, homeScore: 20,
+        scoringPlay: true, isPenalty: false },
+      { id: 'retained-2', sequenceNumber: '9500100', type: { text: 'Penalty' },
+        text: 'PENALTY on LV-R.Jones, Offensive Holding, 10 yards, enforced at LV 16 - No Play.',
+        awayScore: 30, homeScore: 20, scoringPlay: false, isPenalty: true,
+        penalty: { yards: 10, type: { text: 'Offensive Holding' } } },
+      { id: 'retained-3', sequenceNumber: '9500200', type: { text: 'Rush' },
+        text: 'A.Okafor left end for 1 yard.', awayScore: 30, homeScore: 20,
+        scoringPlay: false, isPenalty: false }
+    ]
+  });
+  summary.drives.previous.push({
+    id: 'integrity-drive', team: { abbreviation: 'LV', displayName: 'Las Vegas Raiders', logos: [] },
+    plays: [
+      { id: 'integrity-base', sequenceNumber: '9700000', type: { text: 'Rush' },
+        text: 'A.Run for 1 yard.', awayScore: 24, homeScore: 20, scoringPlay: false, isPenalty: false },
+      { id: 'integrity-drop', sequenceNumber: '9700100', type: { text: 'Rush' },
+        text: 'A.Run for 2 yards.', awayScore: 17, homeScore: 20, scoringPlay: false, isPenalty: false }
+    ]
+  });
+  reviewTimer.callback();
+  await settle();
+  const outcomeHTML = elements['day-booth'].innerHTML;
+  assert.strictEqual(outcomeHTML.indexOf('>NO ROLLBACK<'), -1,
+    'retained rows cannot enter the live nullified feed');
+  assert.strictEqual(outcomeHTML.indexOf('>DATA CHECK<'), -1,
+    'audit rows cannot enter the live nullified feed');
+  assert.strictEqual(outcomeHTML.indexOf('A.Run for 2 yards.'), -1);
+  assert.strictEqual(audio.oscillatorCount, soundAfterVerdict,
+    'retained and irregular source records remain silent');
+  assert.strictEqual(notifications.length, 1);
+
+  // A source can also drop a pending scoring ruling altogether. Preserve that
+  // as an audit record, never as a guessed outcome or an all-games alert.
+  const disappearingDrive = {
+    id: 'disappearing-review', team: { abbreviation: 'LV', displayName: 'Las Vegas Raiders', logos: [] },
+    plays: [
+      { id: 'disappear-td', sequenceNumber: '9800000', type: { text: 'Rush' },
+        text: 'A.Run for 3 yards, TOUCHDOWN.', awayScore: 24, homeScore: 20,
+        scoringPlay: true, isPenalty: false },
+      { id: 'disappear-review', sequenceNumber: '9800100', type: { text: 'Pass Reception' },
+        text: 'Play under review.', awayScore: 24, homeScore: 20,
+        scoringPlay: false, isPenalty: false }
+    ]
+  };
+  summary.drives.previous.push(disappearingDrive);
+  reviewTimer.callback();
+  await settle();
+  assert.strictEqual(elements['day-booth'].innerHTML.indexOf('>POTENTIAL<'), -1);
+  summary.drives.previous.splice(summary.drives.previous.indexOf(disappearingDrive), 1);
+  reviewTimer.callback();
+  await settle();
+  assert.strictEqual(elements['day-booth'].innerHTML.indexOf('Pending scoring ruling no longer in source'), -1,
+    'the default live feed remains outcome-only even for a source disappearance');
+  assert.strictEqual(audio.oscillatorCount, soundAfterVerdict);
+  assert.strictEqual(notifications.length, 1);
+
+  clickDayTab('integrity');
+  const auditHTML = elements['day-booth'].innerHTML;
+  assert.ok(auditHTML.indexOf('Source data checks · all games') !== -1);
+  assert.ok(auditHTML.indexOf('>DATA CHECK<') !== -1);
+  assert.ok(auditHTML.indexOf('A.Run for 2 yards.') !== -1);
+  assert.ok(auditHTML.indexOf('Pending scoring ruling no longer in source') !== -1,
+    'a disappeared potential is flagged only in the audit view');
+  assert.strictEqual(auditHTML.indexOf('TOUCHDOWN NULLIFIED by Penalty'), -1,
+    'the audit tab is not another nullification feed');
+  assert.strictEqual(audio.oscillatorCount, soundAfterVerdict);
+  assert.strictEqual(notifications.length, 1);
+
+  clickDayTab('nullified');
+  assert.strictEqual(elements['day-booth'].innerHTML.indexOf('>DATA CHECK<'), -1);
+  assert.strictEqual(elements['day-booth'].innerHTML.indexOf('A.Run for 2 yards.'), -1);
+
+  // The retained scoring-linked record is visible only in its own category.
+  clickGameTab('flags');
+  category = elements['game-content'].innerHTML;
+  assert.ok(category.indexOf('R.Jones') !== -1);
+  assert.ok(category.indexOf('>NO ROLLBACK<') !== -1);
+  clickGameTab('integrity');
+  category = elements['game-content'].innerHTML;
+  assert.ok(category.indexOf('A.Run for 2 yards.') !== -1);
+  assert.ok(category.indexOf('Pending scoring ruling no longer in source') !== -1);
+  assert.ok(category.indexOf('>DATA CHECK<') !== -1);
+
+  // A normal nullification day row opens Nullified; a red-zone row opens Red
+  // Zone. Both routes are explicit data attributes rather than a mixed filter.
+  elements['back-btn'].dispatch('click', {});
   elements['day-booth'].dispatch('click', {
     target: {
       closest: function (selector) {
-        if (selector === '.day-sound-btn' || selector === '.day-filter') return null;
+        if (selector === '.day-sound-btn' || selector === '.day-watch-tab') return null;
         if (selector === '.day-msg') {
-          return { getAttribute: function () { return '401873286'; } };
+          return { getAttribute: function (name) {
+            return name === 'data-id' ? '401873286' : 'nullified';
+          } };
         }
         return null;
       }
     }
   });
-  assert.strictEqual(elements['game-view'].classList.contains('hidden'), false);
-  assert.ok(elements['tabs'].innerHTML.indexOf(
-    'class="tab active" data-tab="redzone"') !== -1);
-  assert.strictEqual(pendingSummaries.length, 1,
-    'opening the game from a day-booth message requests its detail');
-  pendingSummaries.shift()();
-  await flush();
-  await flush();
+  await settle();
+  assert.ok(elements.tabs.innerHTML.indexOf('class="tab active" data-tab="nullified"') !== -1);
   elements['back-btn'].dispatch('click', {});
-  assert.strictEqual(elements['game-view'].classList.contains('hidden'), true);
 
-  // Switching back to All restores the full day feed.
-  clickDayFilter('all');
-  assert.ok(elements['day-booth'].innerHTML.indexOf('enforced at LV 25') !== -1);
-
-  // Open the game from the scoreboard card and switch to the Red Zone tab.
-  // holdSummaries is still on, so the detail request parks in pendingSummaries.
-  elements['scoreboard-view'].dispatch('click', {
-    target: {
-      closest: function (selector) {
-        if (selector === '.day-chip') return null;
-        if (selector === '.game-card') {
-          return { getAttribute: function () { return '401873286'; } };
-        }
-        return null;
-      }
-    }
-  });
-  assert.strictEqual(pendingSummaries.length, 1, 'opening the game requests its detail');
-  pendingSummaries.shift()();
-  await flush();
-  await flush();
-  assert.strictEqual(elements['game-view'].classList.contains('hidden'), false);
-  assert.strictEqual(elements['game-content'].innerHTML.indexOf('Loading game data'), -1);
-
-  elements['tabs'].dispatch('click', {
-    target: {
-      closest: function (selector) {
-        return selector === '.tab'
-          ? { getAttribute: function () { return 'redzone'; } }
-          : null;
-      }
-    }
-  });
-  const rzHTML = elements['game-content'].innerHTML;
-  assert.ok(rzHTML.indexOf('Red zone nullified scores') !== -1);
-  // The regression this tab exists for: the fixture's red-zone touchdown
-  // wiped by an accepted foul (enforced at HST 14) IS shown, badged, and
-  // counted in the banner.
-  assert.ok(rzHTML.indexOf('TOUCHDOWN NULLIFIED by Penalty') !== -1);
-  assert.ok(rzHTML.indexOf('enforced at HST 14') !== -1);
-  assert.ok(rzHTML.indexOf('badge rz') !== -1);
-  assert.ok(rzHTML.indexOf('1 NULLIFIED IN RZ') !== -1);
-  // The red-zone false start at HOU 19 wiped no score, so it is excluded.
-  assert.strictEqual(rzHTML.indexOf('enforced at HST 19'), -1);
-  // Non-red-zone booth events are excluded too: the LV 25 false start, the
-  // HOU 34 replay/review entries, and the live under-review play (which
-  // carries no position data).
-  assert.ok(rzHTML.indexOf('enforced at LV 25') === -1);
-  assert.ok(rzHTML.indexOf('Play under review') === -1);
-  assert.ok(rzHTML.indexOf('data-redzone-filter') !== -1);
-  assert.strictEqual(rzHTML.indexOf('PTS AT RISK'), -1);
-  assert.strictEqual(rzHTML.indexOf('data-redzone-filter="risk"'), -1);
-
-  // The red zone filter buttons are wired through the delegated handler.
-  elements['game-content'].dispatch('click', {
-    target: {
-      closest: function (selector) {
-        if (selector !== '.booth-filter') return null;
-        return {
-          getAttribute: function (attr) {
-            return attr === 'data-redzone-filter' ? 'penalty' : null;
-          }
-        };
-      }
-    }
-  });
-  assert.ok(elements['game-content'].innerHTML.indexOf(
-    'class="booth-filter active" data-redzone-filter="penalty"') !== -1);
-
-  // --- Multi-game day: the Red zone filter cuts EVERY game of the day -----
-  // The next day serves two live games. Each has exactly one nullified
-  // red-zone score: LV @ HOU's touchdown wiped at HST 14, and SF @ LAC's
-  // touchdown wiped at LAC 9. Each also carries red-zone events that wiped
-  // nothing (the HST 19 false start, the LAC 12 upheld challenge) plus
-  // events from farther out. holdSummaries is off again, so every request
-  // resolves on its own.
-  holdSummaries = false;
+  // Move to a date with two live games. Both are fetched automatically and
+  // only their confirmed scoring nullifications merge into the all-games feed.
   elements['next-day'].dispatch('click', {});
-  await flush();
-  await flush();
-  await flush();
-
-  // Both games rendered, and the day feed merged both games' booth events.
+  await settle(5);
   const twoGameDay = elements['day-booth'].innerHTML;
   assert.ok(elements['scoreboard-view'].innerHTML.indexOf('data-id="299001001"') !== -1);
-  assert.ok(twoGameDay.indexOf('enforced at HST 19') !== -1);   // game A, red zone
-  assert.ok(twoGameDay.indexOf('enforced at HST 14') !== -1);   // game A, red zone, nullified
-  assert.ok(twoGameDay.indexOf('catch ruling') !== -1);         // game B, red zone
-  assert.ok(twoGameDay.indexOf('enforced at LAC 9') !== -1);    // game B, red zone, nullified
-  assert.ok(twoGameDay.indexOf('enforced at SF 47') !== -1);    // game B, midfield
-  // The Red zone chip counts the nullified red-zone score of EACH game: 1 + 1.
-  assert.ok(twoGameDay.indexOf('Red zone · 2') !== -1);
+  assert.ok(twoGameDay.indexOf('enforced at HST 14') !== -1);
+  assert.ok(twoGameDay.indexOf('enforced at LAC 9') !== -1);
+  assert.strictEqual(twoGameDay.indexOf('catch ruling'), -1);
+  assert.strictEqual(twoGameDay.indexOf('enforced at SF 47'), -1);
+  assert.strictEqual(twoGameDay.indexOf('>POTENTIAL<'), -1);
+  assert.strictEqual(twoGameDay.indexOf('>NO ROLLBACK<'), -1);
+  assert.strictEqual(twoGameDay.indexOf('>DATA CHECK<'), -1);
 
-  clickDayFilter('redzone');
-  const twoGameRz = elements['day-booth'].innerHTML;
-  assert.ok(twoGameRz.indexOf(
-    'class="booth-filter day-filter active" data-day-filter="redzone"') !== -1);
-  // The nullified red-zone score of BOTH games is kept…
-  assert.ok(twoGameRz.indexOf('Red zone · 2') !== -1);
-  assert.ok(twoGameRz.indexOf('enforced at HST 14') !== -1);
-  assert.ok(twoGameRz.indexOf('enforced at LAC 9') !== -1);
-  // …while red-zone events that wiped no score are hidden…
-  assert.strictEqual(twoGameRz.indexOf('enforced at HST 19'), -1);
-  assert.strictEqual(twoGameRz.indexOf('catch ruling'), -1);
-  // …and so is everything farther out, whichever game it came from.
-  assert.ok(twoGameRz.indexOf('enforced at SF 47') === -1);
-  assert.ok(twoGameRz.indexOf('enforced at LV 25') === -1);
-  assert.ok(twoGameRz.indexOf('Play under review') === -1);
-
-  // Clicking the second game's filtered message opens that game's own
-  // Red Zone tab, which shows the same cut for its game.
   elements['day-booth'].dispatch('click', {
     target: {
       closest: function (selector) {
-        if (selector === '.day-sound-btn' || selector === '.day-filter') return null;
+        if (selector === '.day-sound-btn' || selector === '.day-watch-tab') return null;
         if (selector === '.day-msg') {
-          return { getAttribute: function () { return '299001001'; } };
+          return { getAttribute: function (name) {
+            return name === 'data-id' ? '299001001' : 'redzone';
+          } };
         }
         return null;
       }
     }
   });
-  await flush();
-  await flush();
-  await flush();
-  assert.strictEqual(elements['game-view'].classList.contains('hidden'), false);
+  await settle();
   assert.strictEqual(elements['game-pos'].textContent, '2 of 2');
-  assert.ok(elements['tabs'].innerHTML.indexOf(
-    'class="tab active" data-tab="redzone"') !== -1);
-  const secondGameRz = elements['game-content'].innerHTML;
-  assert.ok(secondGameRz.indexOf('Red zone nullified scores') !== -1);
-  assert.ok(secondGameRz.indexOf('enforced at LAC 9') !== -1);
-  assert.ok(secondGameRz.indexOf('1 NULLIFIED IN RZ') !== -1);
-  assert.strictEqual(secondGameRz.indexOf('catch ruling'), -1);
-  assert.ok(secondGameRz.indexOf('enforced at SF 47') === -1);
-
-  // Leave the day booth in its default state for tidiness.
-  elements['back-btn'].dispatch('click', {});
-  clickDayFilter('all');
-  assert.ok(elements['day-booth'].innerHTML.indexOf('enforced at SF 47') !== -1);
+  assert.ok(elements.tabs.innerHTML.indexOf('class="tab active" data-tab="redzone"') !== -1);
+  assert.ok(elements['game-content'].innerHTML.indexOf('enforced at LAC 9') !== -1);
 
   console.log('NFL scoreboard app smoke test');
-  console.log('  ✓ live details use the 1-second timer');
-  console.log('  ✓ overlapping detail requests are deduplicated');
-  console.log('  ✓ a changed review result replaces the pending message and badge');
-  console.log('  ✓ unchanged review ticks avoid redundant scoreboard renders');
-  console.log('  ✓ visible-tab return refreshes scores and reviews immediately');
-  console.log('  ✓ score and detail requests bypass the browser HTTP cache');
-  console.log('  ✓ a live-to-final transition fetches one final detail snapshot');
-  console.log('  ✓ idle final-game ticks do not rebuild an unchanged booth feed');
-  console.log('  ✓ live review content renders from the supplied API-shaped payload');
-  console.log('  ✓ the booth sound button toggles and plays the rain alert sound');
-  console.log('  ✓ a touchdown wiped by an accepted foul is badged NULLIFIED in feed and card');
-  console.log('  ✓ only nullified scores alert: a plain flag is silent, a reversal alerts');
-  console.log('  ✓ red-zone booth events carry the RZ badge in the all-games feed');
-  console.log('  ✓ the all-games booth has the Red zone filter (chip, count, cut, click-through)');
-  console.log('  ✓ the Red Zone tab shows only nullified red-zone scores, with working filters');
-  console.log('  ✓ a two-game day counts and filters nullified red-zone scores from EACH game');
+  console.log('  ✓ all-games live feed contains confirmed scoring nullifications only');
+  console.log('  ✓ flags, challenges, replay, under-review, nullified, red-zone, and data checks have separate scoring-linked views');
+  console.log('  ✓ potential and retained records stay low-latency but separate and silent');
+  console.log('  ✓ confirmed nullifications alone produce visual/audio/desktop alert paths');
+  console.log('  ✓ source irregularities stay in the dedicated all-games and game-level audit views');
+  console.log('  ✓ all selected-day games are scanned automatically and route to focused tabs');
+
 }
 
 run().catch(function (err) {
