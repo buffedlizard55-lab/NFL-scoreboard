@@ -92,8 +92,14 @@ than assigned to either team.
   credential or demonstrated browser-facing NFL live-data contract.
 - The app schedules the compact header request every 250 ms while selected-day
   games are live, game-detail reconciliation every second, and a selected-day
-  scoreboard refresh every 15 seconds. Those are attempted polling intervals,
-  not an upstream publication or end-to-end latency guarantee.
+  scoreboard refresh every 15 seconds. When a changed header play is provider-
+  classified as a scoring play or a scoring-linked ruling—or the header score
+  changes without a usable last play—it also starts one targeted detail
+  reconciliation immediately rather than waiting for that base second. Shared
+  in-flight guards prevent duplicate detail calls; if a header
+  reply spans one 250 ms tick, the client keeps just one queued follow-up and
+  starts it after the successful reply clears. These are attempted client
+  schedules, not an upstream publication or end-to-end latency guarantee.
 - Provider publication timing, request duration/failure, browser scheduling
   (especially background tabs), rate limits, caching outside the app, and
   autoplay policy can delay or suppress an update or sound. The app requests
@@ -107,7 +113,9 @@ tests cover pending, retained, nullified, and irregular states; touchdowns
 (including defensive and special-teams examples), field goals, PATs, two-point
 tries, and safeties; malformed/partial scores; score-delta ambiguity; and the
 rule that a later substantive play blocks attribution. The app smoke test
-covers all-games collection, the fast header lane, pending-to-nullified and
-pending-disappearance updates, focused category rendering, and the strict rule
-that only a confirmed nullified scoring play can enter the all-games live feed
-or emit sound/desktop-notification alerts.
+covers all-games collection; immediate targeted detail after a changed scoring
+or scoring-ruling header record (including a score update without `lastPlay`);
+a single non-overlapping catch-up header poll after a slow reply;
+pending-to-nullified and pending-disappearance updates; focused category
+rendering; and the strict rule that only a confirmed nullified scoring play can
+enter the all-games live feed or emit sound/desktop-notification alerts.

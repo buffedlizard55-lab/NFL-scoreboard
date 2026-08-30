@@ -57,8 +57,8 @@ async function run() {
   const timers = [];
   const fetches = [];
   const fetchOptions = [];
-  const pendingSummaries = [];
-  let holdSummaries = false;
+  const pendingHeaders = [];
+  let holdHeaders = false;
 
   const liveEvent = JSON.parse(JSON.stringify(sample.event));
   const competition = liveEvent.competitions[0];
@@ -350,9 +350,13 @@ async function run() {
             playByPlayAvailable: comp.playByPlayAvailable
           };
         }
-        return Promise.resolve(response({
+        const payload = {
           sports: [{ leagues: [{ events: [headerEvent(liveEvent), headerEvent(secondEvent)] }] }]
-        }));
+        };
+        if (!holdHeaders) return Promise.resolve(response(payload));
+        return new Promise(function (resolve) {
+          pendingHeaders.push(function () { resolve(response(payload)); });
+        });
       }
       if (url.indexOf('/scoreboard') !== -1) {
         // Only the next day serves the two-game scoreboard; every other day
@@ -364,10 +368,7 @@ async function run() {
       }
       if (url.indexOf('/summary') !== -1) {
         const payload = url.indexOf('event=299001001') !== -1 ? secondSummary : summary;
-        if (!holdSummaries) return Promise.resolve(response(payload));
-        return new Promise(function (resolve) {
-          pendingSummaries.push(function () { resolve(response(payload)); });
-        });
+        return Promise.resolve(response(payload));
       }
       return Promise.reject(new Error('Unexpected URL: ' + url));
     },
@@ -472,6 +473,87 @@ async function run() {
   assert.ok(elements['scoreboard-view'].innerHTML.indexOf('>NULLIFIED<') !== -1);
   assert.strictEqual(notifications.length, 0,
     'initial history and a pending source record never generate desktop notifications');
+
+  // A changed header scoring-review candidate starts that game's full detail
+  // reconciliation immediately; it does not wait for the one-second review
+  // timer. An unrelated flag with cached context does not create extra load.
+  const summariesBeforeFastCandidate = fetches.filter(function (url) {
+    return url.indexOf('/summary') !== -1;
+  }).length;
+  liveScoreTimer.callback();
+  await settle();
+  assert.strictEqual(fetches.filter(function (url) {
+    return url.indexOf('/summary') !== -1;
+  }).length, summariesBeforeFastCandidate + 1,
+  'a scoring-linked under-review header triggers targeted detail immediately');
+
+  const summariesAfterFastCandidate = fetches.filter(function (url) {
+    return url.indexOf('/summary') !== -1;
+  }).length;
+  // A substantive normal snap between the old scoring ruling and this flag
+  // proves the flag has no causal scoring context.
+  const ordinaryHeaderContext = {
+    id: 'ordinary-header-context', plays: [{
+      id: 'ordinary-header-context-play', sequenceNumber: '9199900',
+      type: { text: 'Rush' }, text: 'A.Run for 2 yards.',
+      awayScore: 0, homeScore: 7, scoringPlay: false, isPenalty: false
+    }]
+  };
+  summary.drives.previous.push(ordinaryHeaderContext);
+  const originalHeaderSituation = competition.situation;
+  competition.situation = {
+    lastPlay: {
+      id: 'ordinary-header-flag', sequenceNumber: '9200000',
+      text: 'PENALTY on LV-X.Player, False Start, 5 yards - No Play.',
+      type: { text: 'Penalty' }, isPenalty: true, awayScore: 0, homeScore: 7,
+      period: { number: 2 }, clock: { displayValue: '9:58' }
+    }
+  };
+  liveScoreTimer.callback();
+  await settle();
+  assert.strictEqual(fetches.filter(function (url) {
+    return url.indexOf('/summary') !== -1;
+  }).length, summariesAfterFastCandidate,
+  'an unrelated header flag does not bypass the normal all-games detail cadence');
+  summary.drives.previous.splice(summary.drives.previous.indexOf(ordinaryHeaderContext), 1);
+
+  const summariesBeforeFastScore = fetches.filter(function (url) {
+    return url.indexOf('/summary') !== -1;
+  }).length;
+  competition.situation = {
+    lastPlay: {
+      id: 'fast-scoring-safety', sequenceNumber: '9300000',
+      text: 'R.Runner is tackled in the end zone for a SAFETY.',
+      type: { text: 'Safety' }, scoringPlay: true, awayScore: 0, homeScore: 9,
+      period: { number: 2 }, clock: { displayValue: '9:42' }
+    }
+  };
+  liveScoreTimer.callback();
+  await settle();
+  assert.strictEqual(fetches.filter(function (url) {
+    return url.indexOf('/summary') !== -1;
+  }).length, summariesBeforeFastScore + 1,
+  'a provider scoring play (including a safety) also triggers immediate reconciliation');
+
+  // Score movement is also reconciled when a compact update temporarily lacks
+  // a usable last-play object.
+  const awayCompetitor = competition.competitors.find(function (team) {
+    return team.homeAway === 'away';
+  });
+  const originalAwayScore = awayCompetitor.score;
+  const summariesBeforeBareScore = fetches.filter(function (url) {
+    return url.indexOf('/summary') !== -1;
+  }).length;
+  competition.situation = null;
+  awayCompetitor.score = '2';
+  liveScoreTimer.callback();
+  await settle();
+  assert.strictEqual(fetches.filter(function (url) {
+    return url.indexOf('/summary') !== -1;
+  }).length, summariesBeforeBareScore + 1,
+  'a header score change without last-play context triggers immediate reconciliation');
+  awayCompetitor.score = originalAwayScore;
+  competition.situation = originalHeaderSituation;
 
   // Each scoring-linked ruling classification has an independent game tab.
   // First open the game while the source still calls rev-2 "under review".
@@ -712,6 +794,31 @@ async function run() {
   assert.strictEqual(twoGameDay.indexOf('>NO ROLLBACK<'), -1);
   assert.strictEqual(twoGameDay.indexOf('>DATA CHECK<'), -1);
 
+  // If a compact header reply takes longer than its 250 ms interval, retain
+  // one missed tick and launch it as soon as the response clears. This avoids
+  // idle scheduler time without allowing concurrent header fetches.
+  const headersBeforeSlowReply = fetches.filter(function (url) {
+    return url.indexOf('/scoreboard/header') !== -1;
+  }).length;
+  holdHeaders = true;
+  liveScoreTimer.callback();
+  liveScoreTimer.callback();
+  assert.strictEqual(fetches.filter(function (url) {
+    return url.indexOf('/scoreboard/header') !== -1;
+  }).length, headersBeforeSlowReply + 1,
+  'a slow compact-header response still has only one request in flight');
+  assert.strictEqual(pendingHeaders.length, 1);
+  pendingHeaders.shift()();
+  await settle();
+  assert.strictEqual(fetches.filter(function (url) {
+    return url.indexOf('/scoreboard/header') !== -1;
+  }).length, headersBeforeSlowReply + 2,
+  'one missed compact-header tick starts immediately after a successful slow reply');
+  assert.strictEqual(pendingHeaders.length, 1);
+  holdHeaders = false;
+  pendingHeaders.shift()();
+  await settle();
+
   elements['day-booth'].dispatch('click', {
     target: {
       closest: function (selector) {
@@ -733,6 +840,8 @@ async function run() {
   console.log('NFL scoreboard app smoke test');
   console.log('  ✓ all-games live feed contains confirmed scoring nullifications only');
   console.log('  ✓ flags, challenges, replay, under-review, nullified, red-zone, and data checks have separate scoring-linked views');
+  console.log('  ✓ changed score and scoring-ruling header records trigger immediate targeted detail reconciliation');
+  console.log('  ✓ a slow compact-header reply queues one non-overlapping follow-up poll');
   console.log('  ✓ potential and retained records stay low-latency but separate and silent');
   console.log('  ✓ confirmed nullifications alone produce visual/audio/desktop alert paths');
   console.log('  ✓ source irregularities stay in the dedicated all-games and game-level audit views');

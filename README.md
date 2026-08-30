@@ -83,15 +83,21 @@ While selected-day games are live and the page is visible, the app attempts:
 | Lane | Nominal schedule | Purpose |
 | --- | ---: | --- |
 | ESPN compact live header | every 250 ms | Fast score/status/last-play detection across the league |
+| Targeted ESPN game detail | immediately after a changed scoring/scoring-ruling header play or score | One-shot full-play-by-play reconciliation for that game; does not wait for the next base cycle |
 | ESPN game detail | every 1 second per live selected-day game | Full play-by-play reconciliation and score-ruling context |
 | Selected-day scoreboard | every 15 seconds | Game list and scheduled/final status refresh |
 
-Requests use `cache: 'no-store'` and an in-flight guard prevents overlapping
-requests in each lane. The intervals are not a freshness or end-to-end latency
-guarantee: upstream publication, network delay/failure, rate limits, browser
-scheduling/background tabs, caching outside this app, and autoplay policy are
-outside the app's control. A browser may also suppress sound until a user has
-interacted with the page.
+Requests use `cache: 'no-store'` and a shared in-flight guard prevents
+overlapping requests in each lane. A changed header can therefore start one
+scoring-relevant game's detail request immediately; once that game has cached
+play context, ordinary unrelated flags stay on the base cadence. If a compact-
+header reply outlasts its 250 ms interval, one missed tick is queued and starts
+immediately after that successful reply, rather than waiting for another
+interval boundary. These attempted intervals are not a freshness or end-to-end
+latency guarantee: upstream publication, network delay/failure, rate limits,
+browser scheduling/background tabs, caching outside this app, and autoplay
+policy are outside the app's control. A browser may also suppress sound until a
+user has interacted with the page.
 
 ## Quick start
 

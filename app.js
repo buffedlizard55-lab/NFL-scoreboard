@@ -170,6 +170,7 @@
     daySummaries: {},      // eventId -> { drives, situation, final }
     summaryRequests: {},   // eventId -> { promise, final } for an in-flight fetch
     liveHeaderRequest: null, // one in-flight league-wide live-score request
+    liveHeaderQueued: false, // one missed 250ms tick to run after a slow header reply
     dayFeed: { items: [], primed: false }, // confirmed nullified scores only
     dayAuditItems: [],     // current source irregularities; separate from live feed
     dayPendingRulings: {}, // prior pending source rows, for disappearance audits
@@ -571,6 +572,13 @@
       st.clock, st.period, !!st.completed].join('|') + '|' + boothCardSignature(ev);
   }
 
+  function eventScoreSignature(ev) {
+    if (!ev) return '';
+    const away = ev.away || {};
+    const home = ev.home || {};
+    return [away.score != null ? away.score : '', home.score != null ? home.score : ''].join('|');
+  }
+
   function hydrateEventFromSummary(ev, json) {
     const competition = json && json.header && json.header.competitions &&
       json.header.competitions[0];
@@ -687,15 +695,53 @@
     return true;
   }
 
+  /*
+   * The compact header is the fastest provider lane available to this static
+   * client, but it does not always carry enough prior-play context to resolve
+   * a scoring ruling. On a newly published scoring play or a source-classified
+   * booth event, start that one game's full detail request immediately instead
+   * of waiting for the next one-second all-games cycle. Once cached context is
+   * available, ordinary unrelated flags are deliberately skipped.
+   *
+   * This is a one-shot, per changed header play. It does not turn the public
+   * endpoint into an unbounded sub-second detail poll, and the shared
+   * in-flight request guard still prevents duplicate requests.
+   */
+  function headerNeedsImmediateRulingDetail(ev) {
+    const play = ev && ev.situation && ev.situation.lastPlay;
+    if (!play) return false;
+    // NFL replay officials confirm every scoring play and try attempt. A
+    // provider scoring flag is therefore worth reconciling immediately even
+    // before a review/penalty line is published.
+    if (play.scoringPlay === true) return true;
+    if (!NFLMap.classifyBooth(play)) return false;
+
+    const cached = ev.id != null ? state.daySummaries[ev.id] : null;
+    // With no play-by-play context yet, a provider-classified ruling is the
+    // safest available reason to fetch the initial detail snapshot.
+    if (!cached || !cached.drives) return true;
+
+    const playId = play.id != null ? String(play.id) : '';
+    return NFLMap.scoringRulingEvents(cached.drives, play).some(function (event) {
+      if (!event || !event.scoringRuling) return false;
+      return event.live || (!!playId && event.id != null && String(event.id) === playId);
+    });
+  }
+
   function refreshLiveScores() {
     // This endpoint is for ESPN's current live header; it is not a substitute
     // for browsing an arbitrary historical day, and is skipped when nothing
     // selected is live.
     if (!state.events.some(function (ev) { return ev.status && ev.status.state === 'in'; })) return;
     // A timer tick never starts a second league-wide request while the prior
-    // one is still on the wire. This bounds traffic and prevents an older
-    // response from racing a newer one.
-    if (state.liveHeaderRequest) return;
+    // one is still on the wire. Remember one missed tick so a slow response
+    // can be followed immediately rather than idling until the next interval
+    // boundary; requests still never overlap.
+    if (state.liveHeaderRequest) {
+      state.liveHeaderQueued = true;
+      return;
+    }
+    let headerSucceeded = false;
     const stamp = toYMD(state.date);
     // `cache: no-store` controls the browser cache. A unique, ignored query
     // value also prevents a query-keyed intermediary from reusing the prior
@@ -709,6 +755,7 @@
     state.liveHeaderRequest = request;
     request
       .then(function (data) {
+        headerSucceeded = true;
         if (toYMD(state.date) !== stamp) return;
         const byId = {};
         liveHeaderEvents(data).forEach(function (event) {
@@ -717,24 +764,37 @@
         let cardsChanged = false;
         let openChanged = false;
         let fastPlayChanged = false;
+        const immediateDetailIds = [];
         const cardSignatures = {};
         state.events.forEach(function (ev) {
           const source = byId[String(ev.id)];
           if (!source) return;
           cardSignatures[String(ev.id)] = eventCardSignature(ev);
+          const priorScore = eventScoreSignature(ev);
           const competition = headerCompetition(source);
           if (!competition) return;
           hydrateEventFromSummary(ev, { header: { competitions: [competition] } });
+          const scoreChanged = priorScore !== eventScoreSignature(ev);
           // The 250 ms header is the fast lane for a new scoring review or
-          // penalty. It updates the all-games scoring watch immediately; the
-          // full play-by-play response reconciles it on the next detail pass.
-          if (recordFastHeaderPlay(ev)) fastPlayChanged = true;
+          // penalty. It updates the all-games scoring watch immediately; a
+          // scoring-relevant change (or a score change with no usable last
+          // play) also starts targeted reconciliation now.
+          const playChanged = recordFastHeaderPlay(ev);
+          if (playChanged) fastPlayChanged = true;
+          if (scoreChanged || (playChanged && headerNeedsImmediateRulingDetail(ev))) {
+            immediateDetailIds.push(ev.id);
+          }
         });
+        // Do not wait for the next one-second scheduler tick when the header
+        // just published a possible scoring ruling or score change. This call
+        // is nonblocking and skips any game whose ordinary periodic detail
+        // request is already in flight.
+        if (immediateDetailIds.length) refreshDayBooth(immediateDetailIds);
         if (fastPlayChanged) {
           renderDayBooth();
           // The fast header is also useful while a listener is watching one
           // of the focused ruling categories: render that view immediately,
-          // while the full one-second play-by-play response reconciles it.
+          // while the targeted or one-second play-by-play response reconciles it.
           if (state.summary && current() && RULING_TABS.indexOf(state.activeTab) >= 0) {
             renderGameHeader();
             renderTabContent();
@@ -751,7 +811,16 @@
       })
       .catch(function () { /* the detail/scoreboard paths remain fallbacks */ })
       .then(function () {
-        if (state.liveHeaderRequest === request) state.liveHeaderRequest = null;
+        if (state.liveHeaderRequest !== request) return;
+        state.liveHeaderRequest = null;
+        const runQueuedPoll = state.liveHeaderQueued;
+        state.liveHeaderQueued = false;
+        // When a request lasted beyond a 250 ms tick, begin the one queued
+        // poll as soon as this successful reply has cleared. Do not schedule a
+        // hidden-tab retry or turn a failure into a tight retry loop.
+        if (runQueuedPoll && headerSucceeded && document.visibilityState !== 'hidden') {
+          refreshLiveScores();
+        }
       });
   }
 
@@ -772,20 +841,28 @@
 
   /*
    * Fetch play-by-play for every selected-day game that has (or had) action:
-   * live games on every one-second scoring-rulings cycle, then one final
+   * live games on every one-second scoring-rulings cycle, an immediate
+   * targeted pass after a scoring-relevant header change, then one final
    * snapshot after the scoreboard reports it finished. Each response updates
    * cached data and the focused watch; larger non-ruling tabs repaint at most
    * every five seconds. The interval is an attempted client schedule, not an
    * upstream-data latency guarantee.
    */
-  function refreshDayBooth() {
+  function refreshDayBooth(targetEventIds) {
     if (!state.events.length) {
       renderDayBooth();
       return;
     }
+    const targetIds = Array.isArray(targetEventIds) && targetEventIds.length
+      ? targetEventIds.reduce(function (set, id) {
+        if (id != null) set[String(id)] = true;
+        return set;
+      }, {})
+      : null;
     const stamp = toYMD(state.date);
     const jobs = [];
     state.events.forEach(function (ev) {
+      if (targetIds && (!ev.id || !targetIds[String(ev.id)])) return;
       if (!ev.id || !dayBoothScannable(ev)) return;
       if (state.summaryRequests[ev.id]) return;
       const st = ev.status && ev.status.state;
@@ -1986,6 +2063,7 @@
     state.dayWatchTab = 'nullified';
     state.alertedScoringKeys = {};
     state.fastPlaySignatures = {};
+    state.liveHeaderQueued = false;
     $('day-booth').classList.add('hidden');
     $('date-label').textContent = fmtDateLabel(d);
     showScoreboardView();
