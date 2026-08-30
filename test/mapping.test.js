@@ -1062,31 +1062,212 @@ ok('a TD and its review published as one play: nothing is nullified until the ve
   assert.strictEqual(resolved.nullified, true);
 });
 
-ok('a delayed review after a PAT and a timeout only reports once points come off', function () {
-  // Sequence: TD, PAT good, timeout, procedural play, review — the review is
-  // 4 plays after the touchdown. Nothing has been taken off the board yet.
+ok('a delayed score rollback after a substantive play becomes an integrity review, not a guessed nullification', function () {
+  // The new rush breaks the causal scoring-ruling chain. Even though a later
+  // replay row and score decrease look tempting, the mapper must not claim it
+  // overturned the earlier TD/PAT without a contiguous source link.
   const plays = [
     { id: 'td', sequenceNumber: '100', type: { text: 'Rush' }, text: 'K.Cole 4 yard TD run.', awayScore: 6, homeScore: 0, scoringPlay: true, isPenalty: false },
     { id: 'pat', sequenceNumber: '200', type: { text: 'Extra Point' }, text: 'K.Matsuzawa extra point is GOOD.', awayScore: 7, homeScore: 0, scoringPlay: true, isPenalty: false },
     { id: 'to', sequenceNumber: '300', type: { text: 'Timeout' }, text: 'Timeout #1 by LV.', awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: false },
     { id: 'proc', sequenceNumber: '400', type: { text: 'Rush' }, text: 'W.Marks for 0 yards.', awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: false },
-    { id: 'rev', sequenceNumber: '500', type: { text: 'Replay Review' }, text: 'Play under review.', awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: false }
-  ];
-  const quiet = NFLMap.boothEventContext(NFLMap.boothEvent(plays[4]), plays, 4);
-  assert.strictEqual(quiet.nullified, false, 'a pending review removes nothing');
-  assert.strictEqual(quiet.removesPoints, false);
-
-  // The verdict arrives and the score falls 7 -> 0: now it is a nullification.
-  const settled = plays.concat([
+    { id: 'rev', sequenceNumber: '500', type: { text: 'Replay Review' }, text: 'Play under review.', awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: false },
     { id: 'out', sequenceNumber: '600', type: { text: 'Replay Review' },
       text: 'The replay official reviewed the ruling, and the play was REVERSED.',
       awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false }
-  ]);
-  const ev = NFLMap.boothEventContext(NFLMap.boothEvent(settled[4]), settled, 4);
-  assert.strictEqual(ev.removesPoints, true);
-  assert.strictEqual(ev.pointsRemoved, 7);
-  assert.strictEqual(ev.nullified, true);
+  ];
+  const review = NFLMap.boothEventContext(NFLMap.boothEvent(plays[4]), plays, 4);
+  const verdict = NFLMap.boothEventContext(NFLMap.boothEvent(plays[5]), plays, 5);
+  assert.strictEqual(review.scoringRuling, false);
+  assert.strictEqual(verdict.nullified, false);
+  assert.strictEqual(verdict.removesPoints, false);
+  assert.deepStrictEqual(NFLMap.scoringRulingEvents({ previous: [{ plays: plays }] }), []);
+
+  const issues = NFLMap.scoreIntegrityIssues({ previous: [{ plays: plays }] });
+  assert.strictEqual(issues.length, 1);
+  assert.strictEqual(issues[0].scoringWatch, 'irregular');
+  assert.strictEqual(issues[0].nullified, false);
+  assert.deepStrictEqual(
+    [issues[0].beforeAwayScore, issues[0].beforeHomeScore, issues[0].afterAwayScore, issues[0].afterHomeScore],
+    [7, 0, 0, 0]
+  );
 });
 
+
+// 10. Scoring-rulings watch -------------------------------------------------
+ok('scoringRulingEvents: exposes a pending scoring review without calling it nullified', function () {
+  const plays = [
+    { id: 'base', sequenceNumber: '100', type: { text: 'Rush' }, text: 'A.Run for 2 yards.', awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false },
+    { id: 'td', sequenceNumber: '200', type: { text: 'Pass' }, text: 'A.Pass to B.Receiver for 8 yards, TOUCHDOWN.', awayScore: 0, homeScore: 7, scoringPlay: true, isPenalty: false },
+    { id: 'review', sequenceNumber: '300', type: { text: 'Pass Reception' }, text: 'Play under review.', awayScore: 0, homeScore: 7, scoringPlay: false, isPenalty: false }
+  ];
+  const drives = { previous: [{ id: 'd', plays: plays }] };
+  const events = NFLMap.scoringRulingEvents(drives);
+  assert.strictEqual(events.length, 1);
+  assert.strictEqual(events[0].id, 'review');
+  assert.strictEqual(events[0].scoringWatch, 'pending');
+  assert.strictEqual(events[0].nullified, false);
+  assert.strictEqual(events[0].removesPoints, false);
+  assert.strictEqual(events[0].scoringPlay.id, 'td');
+  assert.deepStrictEqual(NFLMap.scoreIntegrityIssues(drives), []);
+});
+
+ok('scoringRulingEvents: source moving to a normal next play retains a pending score silently', function () {
+  const plays = [
+    { id: 'td', sequenceNumber: '100', type: { text: 'Rush' }, text: 'A.Run, TOUCHDOWN.', awayScore: 7, homeScore: 0, scoringPlay: true, isPenalty: false },
+    { id: 'review', sequenceNumber: '200', type: { text: 'Pass Reception' }, text: 'Play under review.', awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: false },
+    { id: 'next', sequenceNumber: '300', type: { text: 'Kickoff' }, text: 'A.Kicker kicks 65 yards.', awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: false }
+  ];
+  const events = NFLMap.scoringRulingEvents({ previous: [{ id: 'd', plays: plays }] });
+  assert.strictEqual(events.length, 1);
+  assert.strictEqual(events[0].scoringWatch, 'retained');
+  assert.strictEqual(events[0].nullified, false);
+  assert.strictEqual(events[0].nullificationEvidence, 'source moved on with no rollback');
+});
+
+ok('scoringRulingEvents: contiguous review outcome turns the same scoring candidate nullified once', function () {
+  const plays = [
+    { id: 'td', sequenceNumber: '100', type: { text: 'Rush' }, text: 'A.Run, TOUCHDOWN.', awayScore: 0, homeScore: 7, scoringPlay: true, isPenalty: false },
+    { id: 'review', sequenceNumber: '200', type: { text: 'Pass Reception' }, text: 'Play under review.', awayScore: 0, homeScore: 7, scoringPlay: false, isPenalty: false },
+    { id: 'verdict', sequenceNumber: '300', type: { text: 'Replay Review' }, text: 'The replay official reviewed the scoring ruling, and the play was REVERSED.', awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false }
+  ];
+  const drives = { previous: [{ id: 'd', plays: plays }] };
+  const events = NFLMap.scoringRulingEvents(drives);
+  assert.strictEqual(events.length, 2);
+  assert.deepStrictEqual(events.map(function (event) { return event.scoringWatch; }), ['nullified', 'nullified']);
+  assert.deepStrictEqual(events.map(function (event) { return event.scoringPlay.id; }), ['td', 'td']);
+  assert.strictEqual(events[0].nullificationEvidence, 'running-score rollback');
+  assert.strictEqual(events[1].nullificationEvidence, 'running-score rollback');
+  assert.deepStrictEqual(NFLMap.scoreIntegrityIssues(drives), []);
+});
+
+ok('scoringRulingEvents: a NO GOOD / failed try is never promoted by a conflicting source score flag', function () {
+  const cases = [
+    ['fg', 'Field Goal', 'K.Kicker 43 yard field goal is NO GOOD. PENALTY on OFF, Holding, 10 yards - No Play.'],
+    ['pat', 'Extra Point', 'K.Kicker extra point is NO GOOD. PENALTY on OFF, Holding, 10 yards - No Play.'],
+    ['try', 'Two-Point Conversion', 'Two-point conversion pass is incomplete. PENALTY on OFF, Holding, 10 yards - No Play.']
+  ];
+  cases.forEach(function (fixture) {
+    const play = {
+      id: fixture[0], sequenceNumber: '100', type: { text: fixture[1] }, text: fixture[2],
+      awayScore: 0, homeScore: 0, scoringPlay: true, isPenalty: true,
+      penalty: { yards: 10, type: { text: 'Holding' } }
+    };
+    assert.deepStrictEqual(NFLMap.scoringRulingEvents({ previous: [{ plays: [play] }] }), [], fixture[0]);
+  });
+});
+
+ok('scoringRulingEvents: direct nullification wording covers every watched score type', function () {
+  const cases = [
+    {
+      id: 'off-td', type: 'Rush', score: [7, 0],
+      text: 'R.Runner rushes for 4 yards, TOUCHDOWN NULLIFIED by Penalty. PENALTY on OFF, Holding, 10 yards - No Play.'
+    },
+    {
+      id: 'def-td', type: 'Interception Return', score: [7, 0],
+      text: 'D.Back intercepts the pass and returns it 42 yards, TOUCHDOWN NULLIFIED by Penalty. PENALTY on DEF, Illegal Block, 10 yards - No Play.'
+    },
+    {
+      id: 'return-td', type: 'Kickoff Return', score: [0, 7],
+      text: 'R.Returner returns kickoff 101 yards, TOUCHDOWN NULLIFIED by Penalty. PENALTY on RET, Holding, 10 yards - No Play.'
+    },
+    {
+      id: 'field-goal', type: 'Field Goal', score: [3, 0],
+      text: 'K.Kicker 43 yard field goal is GOOD, NULLIFIED by Penalty. PENALTY on OFF, Holding, 10 yards - No Play.'
+    },
+    {
+      id: 'pat', type: 'Extra Point', score: [7, 0],
+      text: 'K.Kicker extra point is GOOD, EXTRA POINT NULLIFIED by Penalty. PENALTY on OFF, Holding, 10 yards - No Play.'
+    },
+    {
+      id: 'two-point', type: 'Two-Point Conversion', score: [8, 0],
+      text: 'TWO-POINT CONVERSION ATTEMPT. R.Runner rushes for two points. ATTEMPT SUCCEEDS NULLIFIED by Penalty. PENALTY on OFF, Holding, 10 yards - No Play.'
+    },
+    {
+      id: 'safety', type: 'Safety', score: [0, 2],
+      text: 'The runner is tackled in the end zone for a SAFETY NULLIFIED by Penalty. PENALTY on DEF, Offside, 5 yards - No Play.'
+    }
+  ];
+  cases.forEach(function (fixture) {
+    const play = {
+      id: fixture.id, sequenceNumber: '100', type: { text: fixture.type }, text: fixture.text,
+      awayScore: fixture.score[0], homeScore: fixture.score[1], scoringPlay: false, isPenalty: true,
+      penalty: { yards: 10, type: { text: 'Holding' } }
+    };
+    const events = NFLMap.scoringRulingEvents({ previous: [{ id: fixture.id, plays: [play] }] });
+    assert.strictEqual(events.length, 1, fixture.id);
+    assert.strictEqual(events[0].scoringWatch, 'nullified', fixture.id);
+    assert.strictEqual(events[0].nullified, true, fixture.id);
+    assert.strictEqual(events[0].removesPoints, false, fixture.id + ' has no invented rollback');
+  });
+});
+
+ok('scoreIntegrityIssues: malformed and partial scores do not invent score drops', function () {
+  const partial = {
+    previous: [{ id: 'd', plays: [
+      { id: 'p1', sequenceNumber: '100', type: { text: 'Rush' }, text: 'A.Run, TOUCHDOWN.', awayScore: 7, scoringPlay: true, isPenalty: false },
+      { id: 'p2', sequenceNumber: '200', type: { text: 'Replay Review' }, text: 'The replay official reviewed the scoring ruling, and the play was REVERSED.', awayScore: 0, scoringPlay: false, isPenalty: false }
+    ] }]
+  };
+  assert.deepStrictEqual(NFLMap.scoreIntegrityIssues(partial), []);
+  const events = NFLMap.scoringWatchEvents(partial);
+  // Explicit contiguous replay wording is still visible, but incomplete score
+  // fields cannot manufacture a numeric rollback or a data-check record.
+  assert.strictEqual(events.length, 1);
+  assert.strictEqual(events[0].scoringWatch, 'nullified');
+  assert.strictEqual(events[0].removesPoints, false);
+  assert.strictEqual(events[0].pointsRemoved, 0);
+  assert.deepStrictEqual(NFLMap.scoringRulingEvents(null), []);
+  assert.deepStrictEqual(NFLMap.scoreIntegrityIssues(null), []);
+  assert.deepStrictEqual(NFLMap.scoringWatchEvents(null), []);
+});
+
+ok('scoreIntegrityIssues: an earlier confirmed rollback cannot mask a later separated score drop', function () {
+  const plays = [
+    { id: 'td', sequenceNumber: '100', type: { text: 'Rush' }, text: 'A.Run, TOUCHDOWN.', awayScore: 7, homeScore: 0, scoringPlay: true, isPenalty: false },
+    { id: 'reversal', sequenceNumber: '200', type: { text: 'Replay Review' }, text: 'The replay official reviewed the scoring ruling, and the play was REVERSED.', awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false },
+    { id: 'later-score', sequenceNumber: '300', type: { text: 'Rush' }, text: 'B.Run for 3 yards.', awayScore: 5, homeScore: 0, scoringPlay: false, isPenalty: false },
+    { id: 'later-drop', sequenceNumber: '400', type: { text: 'Rush' }, text: 'B.Run for 1 yard.', awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false }
+  ];
+  const issues = NFLMap.scoreIntegrityIssues({ previous: [{ id: 'd', plays: plays }] });
+  assert.strictEqual(issues.length, 1);
+  assert.strictEqual(issues[0].sourcePlayId, 'later-drop');
+  assert.deepStrictEqual([issues[0].beforeAwayScore, issues[0].afterAwayScore], [5, 0]);
+});
+
+ok('scoringWatchEvents: combines rulings and silent irregularities in play order', function () {
+  const plays = [
+    { id: 'td', sequenceNumber: '100', type: { text: 'Rush' }, text: 'A.Run, TOUCHDOWN.', awayScore: 7, homeScore: 0, scoringPlay: true, isPenalty: false },
+    { id: 'review', sequenceNumber: '200', type: { text: 'Pass Reception' }, text: 'Play under review.', awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: false },
+    { id: 'normal', sequenceNumber: '300', type: { text: 'Rush' }, text: 'B.Run for 1 yard.', awayScore: 7, homeScore: 0, scoringPlay: false, isPenalty: false },
+    { id: 'drop', sequenceNumber: '400', type: { text: 'Timeout' }, text: 'Official timeout.', awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false }
+  ];
+  const events = NFLMap.scoringWatchEvents({ previous: [{ id: 'd', plays: plays }] });
+  assert.deepStrictEqual(events.map(function (event) { return event.scoringWatch; }), ['retained', 'irregular']);
+  assert.strictEqual(events[1].kind, 'integrity');
+  assert.strictEqual(events[1].nullified, false);
+  assert.strictEqual(events[1].nullificationEvidence, 'unattributed running-score decrease');
+});
+
+ok('isConfirmedNullifiedScoringEvent: strict all-games gate excludes potential, retained, and audit records', function () {
+  const direct = NFLMap.scoringRulingEvents({ previous: [{ plays: [
+    { id: 'nullified', sequenceNumber: '100', type: { text: 'Penalty' },
+      text: 'R.Runner rushes for 4 yards, TOUCHDOWN NULLIFIED by Penalty. PENALTY on OFF, Holding, 10 yards - No Play.',
+      awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: true,
+      penalty: { yards: 10, type: { text: 'Holding' } } }
+  ] }] })[0];
+  assert.strictEqual(direct.scoringWatch, 'nullified');
+  assert.strictEqual(NFLMap.isConfirmedNullifiedScoringEvent(direct), true);
+
+  [
+    { scoringRuling: true, scoringWatch: 'pending', nullified: false },
+    { scoringRuling: true, scoringWatch: 'retained', nullified: false },
+    { scoringRuling: true, scoringWatch: 'irregular', nullified: false, irregularity: true },
+    { scoringRuling: true, scoringWatch: 'nullified', nullified: false },
+    { scoringWatch: 'nullified', nullified: true }
+  ].forEach(function (event) {
+    assert.strictEqual(NFLMap.isConfirmedNullifiedScoringEvent(event), false);
+  });
+});
 
 console.log('\nAll ' + pass + ' mapping tests passed ✓');

@@ -2,7 +2,7 @@
   "name": "nfl-scoreboard",
   "version": "1.0.0",
   "private": true,
-  "description": "Clean NFL scoreboard with play-by-play, team stats and player stats (ESPN public API).",
+  "description": "NFL scoreboard with a confirmed all-games nullified-score feed and separate scoring-ruling views using ESPN Gamecast data.",
   "scripts": {
     "start": "node server.js",
     "test": "node test/mapping.test.js && node test/refresh.test.js && node test/app.test.js"

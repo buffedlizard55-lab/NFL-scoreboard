@@ -1,9 +1,11 @@
 /* ------------------------------------------------------------------------- *\
  * NFL Scoreboard — client app.
- * Data source: ESPN's public NFL API (CORS-enabled, no key required):
+ * Live provider source: ESPN Gamecast web endpoints (not an NFL officiating
+ * API):
  *   - scoreboard: site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard
  *   - game detail: site.web.api.espn.com/apis/site/v2/sports/football/nfl/summary
- * No videos are rendered anywhere.
+ * The endpoint fields are documented in verification.md. No videos are rendered
+ * anywhere.
  * ------------------------------------------------------------------------- */
 (function () {
   'use strict';
@@ -17,20 +19,41 @@
   const LIVE_SCORE_SECONDS = NFLRefresh.LIVE_SCORES_INTERVAL_MS / 1000;
   const BOOTH_SOUND_KEY = 'nflBoothSoundEnabled'; // persisted toggle for the booth alert sound
 
+  /* Keep each ruling type in its own game tab. The all-games panel is more
+   * restrictive: it is a nullified-score feed only. */
   const TABS = [
     { id: 'plays', label: 'Play-by-Play' },
     { id: 'drives', label: 'Scoring Drives' },
-    { id: 'booth', label: 'Flags & Reviews' },
+    { id: 'flags', label: 'Flags' },
+    { id: 'challenges', label: 'Challenges' },
+    { id: 'replay', label: 'Replay' },
+    { id: 'review', label: 'Under review' },
+    { id: 'nullified', label: 'Nullified' },
     { id: 'redzone', label: 'Red Zone' },
+    { id: 'integrity', label: 'Data checks' },
     { id: 'team', label: 'Team Stats' },
     { id: 'players', label: 'Player Stats' }
+  ];
+
+  const RULING_TABS = ['flags', 'challenges', 'replay', 'review', 'nullified', 'redzone', 'integrity'];
+  const DAY_WATCH_TABS = [
+    ['nullified', 'Live nullified'],
+    ['integrity', 'Data checks']
   ];
 
   const BOOTH_KIND_LABEL = {
     penalty: 'Flag',
     challenge: 'Challenge',
     replay: 'Replay',
-    review: 'Under review'
+    review: 'Under review',
+    integrity: 'Data check'
+  };
+
+  const SCORING_WATCH_LABEL = {
+    pending: 'POTENTIAL',
+    nullified: 'NULLIFIED',
+    retained: 'NO ROLLBACK',
+    irregular: 'DATA CHECK'
   };
 
   const BOOTH_RESULT_LABEL = {
@@ -42,65 +65,59 @@
     offsetting: 'Offsetting'
   };
 
-  /* One shared filter row for all three booth feeds (day chat, Flags &
-   * Reviews, Red Zone). "Nullified" selects the events that took a score off
-   * the board: a touchdown, field goal, PAT or 2-point conversion nullified,
-   * or points ESPN actually removed from the running score. */
-  const BOOTH_FILTERS = [
-    ['all', 'All'],
-    ['penalty', 'Flags'],
-    ['challenge', 'Challenges'],
-    ['replay', 'Replay'],
-    ['review', 'Under review'],
-    ['nullified', 'Nullified']
-  ];
+  /* Potential records are tracked in their dedicated game categories. Only a
+   * confirmed nullification can enter the all-games stream or alert. */
 
-  /* The all-games live booth gets one extra chip: the per-game Red Zone cut
-   * (same as a game's Red Zone tab — see NFLMap.isRedZonePlay) applied
-   * across every game of the day. The single-game feeds don't need the chip:
-   * Flags & Reviews badges red-zone plays with RZ instead, and the Red Zone
-   * tab already IS this cut for one game. */
-  const DAY_BOOTH_FILTERS = BOOTH_FILTERS.concat([['redzone', 'Red zone']]);
-
-  /* A booth event counts as a nullification when a score came off the board:
-   * ESPN's running score dropped, or the play text reports the score as
-   * NULLIFIED / wiped by a "- No Play" foul / REVERSED on review. The whole
-   * decision lives in NFLMap so the feeds, the Red Zone tab and the alert
-   * sound can never disagree about what a nullified play is. */
   function boothEventNullified(e) {
     if (!e) return false;
+    // Contextual mapper events always provide an explicit boolean. Respect a
+    // false value so an integrity record with score-like text cannot bypass
+    // the causal checks and become an alert. The fallback supports older/raw
+    // event objects that have no contextual decision yet.
     if (e.nullified != null) return !!e.nullified;
     return NFLMap.boothEventNullifies(e);
   }
 
-  function boothKindCounts(events) {
-    const counts = { all: events.length, penalty: 0, challenge: 0, replay: 0, review: 0, nullified: 0, redzone: 0 };
-    events.forEach(function (e) {
-      if (e && e.kind != null && counts[e.kind] != null) counts[e.kind] += 1;
-      if (boothEventNullified(e)) counts.nullified += 1;
-      if (e && e.redZone && boothEventNullified(e)) counts.redzone += 1;
+  function confirmedNullifiedScoringEvent(e) {
+    // Current mapper records always take the strict final-state route. Keep a
+    // narrow fallback only for an older mapper loaded alongside this client.
+    return typeof NFLMap.isConfirmedNullifiedScoringEvent === 'function'
+      ? NFLMap.isConfirmedNullifiedScoringEvent(e)
+      : boothEventNullified(e);
+  }
+
+  /* A scoring play can yield more than one source row (e.g. "under review"
+   * followed by the replay verdict). Counts and notification identities use
+   * the scoring play, rather than double-counting that ruling sequence. */
+  function scoringIdentity(e) {
+    if (!e) return '';
+    const scoring = e.scoringPlay || e.relatedScoringPlay || null;
+    const playId = scoring && scoring.id != null ? String(scoring.id) :
+      (scoring && scoring.index != null
+        ? 'source-index:' + String(scoring.index) + ':' + String(scoring.text || '')
+        : (e.id != null ? String(e.id) : (e.key != null ? String(e.key) : '')));
+    const gameId = e.gameId != null ? String(e.gameId) : '';
+    return gameId + ':' + playId;
+  }
+
+  function uniqueScoringEvents(events, predicate) {
+    const out = [];
+    const positions = {};
+    (events || []).forEach(function (event) {
+      if (!event || (predicate && !predicate(event))) return;
+      const key = scoringIdentity(event) || ('event:' + (event.id != null ? event.id : out.length));
+      if (Object.prototype.hasOwnProperty.call(positions, key)) {
+        const old = out[positions[key]];
+        // Prefer the later/stronger ruling row for banners and notifications.
+        if ((!old.removesPoints && event.removesPoints) || event.kind === 'replay') {
+          out[positions[key]] = event;
+        }
+        return;
+      }
+      positions[key] = out.length;
+      out.push(event);
     });
-    return counts;
-  }
-
-  function boothEventShown(e, filter) {
-    if (!filter || filter === 'all') return true;
-    if (filter === 'nullified') return boothEventNullified(e);
-    if (filter === 'redzone') return !!(e.redZone && boothEventNullified(e));
-    return e.kind === filter;
-  }
-
-  function boothFiltersHTML(filter, counts, attr, extraClass, filters) {
-    return (filters || BOOTH_FILTERS).map(function (pair) {
-      const id = pair[0], label = pair[1];
-      const n = counts[id];
-      const extra = id === 'all' ? '' : ' · ' + n;
-      return '<button type="button" class="booth-filter' + (extraClass || '') +
-        (filter === id ? ' active' : '') +
-        '" ' + attr + '="' + id + '"' +
-        (n === 0 && id !== 'all' ? ' disabled' : '') + '>' +
-        esc(label) + extra + '</button>';
-    }).join('');
+    return out;
   }
 
   const TEAM_STAT_ORDER = [
@@ -149,20 +166,21 @@
     eventIndex: -1,        // open game within state.events
     summary: null,         // raw summary JSON for the open game
     activeTab: 'plays',
-    lastGameContentRenderAt: 0, // preserve the old 5s cadence outside the booth/redzone tabs
-    boothFilter: 'all',    // all | penalty | challenge | replay | review
-    redZoneFilter: 'all',  // same kinds, for the Red Zone tab
-    seenBoothIds: {},      // play ids already shown in the booth feed
-    boothPrimed: false,    // first paint of a game's booth marks history as seen
+    lastGameContentRenderAt: 0, // preserve the 5s cadence outside ruling-category tabs
     daySummaries: {},      // eventId -> { drives, situation, final }
     summaryRequests: {},   // eventId -> { promise, final } for an in-flight fetch
     liveHeaderRequest: null, // one in-flight league-wide live-score request
-    dayFeed: { items: [], primed: false }, // day-wide booth chat feed
-    dayBoothNullified: {}, // eventId -> newest booth event's nullification state, for card badges
-    dayBoothFilter: 'all', // day-wide booth filter, incl. the 'redzone' cut
-    alertedBoothKeys: {},   // nullified booth events already announced
-    audioContext: null,     // created only after a user gesture (autoplay policy)
-    soundEnabled: true,     // booth alert sound; ON by default so existing alerts still play
+    liveHeaderQueued: false, // one missed 250ms tick to run after a slow header reply
+    dayFeed: { items: [], primed: false }, // confirmed nullified scores only
+    dayAuditItems: [],     // current source irregularities; separate from live feed
+    dayPendingRulings: {}, // prior pending source rows, for disappearance audits
+    dayDisappearanceAuditItems: [], // current pending rows lost by the source
+    dayBoothNullified: {}, // eventId -> newest scoring nullification, for card badges
+    dayWatchTab: 'nullified', // selected all-games panel: nullified or audit
+    alertedScoringKeys: {}, // scoring-play identities already announced
+    fastPlaySignatures: {}, // eventId -> last fast-header play fingerprint
+    audioContext: null,     // created only after a user gesture (browser policy)
+    soundEnabled: true,     // only confirmed nullified scores can use this channel
     polling: null
   };
 
@@ -339,7 +357,7 @@
         updateLiveIndicator();
         if (state.eventIndex >= 0) {
           renderGameHeader();
-          if ((state.activeTab === 'booth' || state.activeTab === 'redzone') && state.summary) {
+          if (RULING_TABS.indexOf(state.activeTab) >= 0 && state.summary) {
             renderTabContent();
           }
         }
@@ -391,12 +409,11 @@
     if (!away || !home) return '';
     const sub = st.sub ? ' <span class="st-sub">' + esc(st.sub) + '</span>' : '';
     const bcast = ev.broadcast ? '<span class="card-bcast">' + esc(ev.broadcast) + '</span>' : '';
-    const liveBooth = lastPlayBooth(ev);
-    const reviewBadge = (liveBooth && liveBooth.kind === 'review')
-      ? '<span class="badge review">REVIEW</span>'
-      : '';
-    // Nullification state of this game's newest booth event, recomputed on
-    // every one-second booth pass (see renderDayBooth): a score was taken
+    // Potential rulings remain in the watch list without producing an alert
+    // badge on a game card. Only a confirmed scoring nullification is promoted
+    // to card-level visual emphasis.
+    // Nullification state of this game's newest scoring-ruling event,
+    // recomputed on every full play-by-play pass (see renderDayBooth): a score was taken
     // off the board on that play.
     const nullified = state.dayBoothNullified[ev.id];
     const nullBadge = nullified
@@ -411,7 +428,7 @@
       '<article class="game-card" data-id="' + esc(ev.id) + '" tabindex="0" role="button" aria-label="' + aria + '">' +
         '<div class="card-top">' +
           '<span class="badge ' + st.cls + '">' + esc(st.text) + sub + '</span>' +
-          reviewBadge + nullBadge + bcast +
+          nullBadge + bcast +
         '</div>' +
         teamRowHTML(away) +
         teamRowHTML(home) +
@@ -480,39 +497,23 @@
     $('live-indicator').classList.toggle('hidden', !live);
   }
 
-  function lastPlayBooth(ev) {
-    const cached = ev && state.daySummaries[ev.id];
-    const cachedPlay = cached && cached.situation && cached.situation.lastPlay;
-    const lp = cachedPlay || (ev && ev.situation && ev.situation.lastPlay);
-    if (!lp) return null;
-    const kind = NFLMap.classifyBooth(lp);
-    if (!kind) return null;
-    return { kind: kind, play: lp, text: lp.text || lp.shortText || '' };
-  }
-
-  /* Everything a game card can show about the booth right now, folded into
-   * one comparable string so a one-second tick only repaints the scoreboard
-   * when a badge actually appears, changes, or disappears. */
+  /* Everything a game card can show about the scoring-rulings watch, folded
+   * into one comparable string so a fast-header tick repaints cards only for
+   * a confirmed nullification badge. */
   function boothCardSignature(ev) {
     if (!ev) return '';
-    const liveBooth = lastPlayBooth(ev);
     const nullified = state.dayBoothNullified[ev.id];
-    return (liveBooth && liveBooth.kind === 'review' ? 'review' : '') + ':' +
-      (nullified ? (nullified.removesPoints ? 'removed' : 'nullified') : '');
+    return nullified ? (nullified.removesPoints ? 'removed' : 'nullified') : '';
   }
 
-  /* ----------------------- day-wide live booth chat ---------------------- */
+  /* ---------------- day-wide confirmed-nullification watch --------------- */
   /*
-   * A chat-style feed of every flag, challenge and replay review from every
-   * game of the selected day. It is built from the same two verified
-   * sources as a game's own Flags & Reviews tab:
-   *   - each played game's summary play-by-play (summary.drives), and
-   *   - each game's latest play from the summary or scoreboard situation.
-   * Messages are kept in discovery order (games are seeded in kickoff
-   * order; newly discovered messages are appended at the bottom), so it
-   * reads like a chat. No per-play timestamps are invented: ordering is by
-   * the sequence ESPN assigns inside each game and by kickoff time across
-   * games.
+   * The live all-games stream contains confirmed score nullifications only.
+   * Every scoring-linked flag, challenge, replay, and under-review record is
+   * still mapped from observed ESPN Gamecast fields (summary.drives and each
+   * game's latest compact-header lastPlay), but it stays in its dedicated
+   * game tab until a final nullification is evidenced. Data irregularities
+   * use a separate audit view; no source outcome is invented.
    */
 
   function summarySituation(summary) {
@@ -569,6 +570,13 @@
     const st = ev.status || {};
     return [away.score, home.score, st.state, st.shortDetail, st.detail,
       st.clock, st.period, !!st.completed].join('|') + '|' + boothCardSignature(ev);
+  }
+
+  function eventScoreSignature(ev) {
+    if (!ev) return '';
+    const away = ev.away || {};
+    const home = ev.home || {};
+    return [away.score != null ? away.score : '', home.score != null ? home.score : ''].join('|');
   }
 
   function hydrateEventFromSummary(ev, json) {
@@ -663,15 +671,77 @@
     };
   }
 
+  function fastHeaderPlaySignature(ev) {
+    const play = ev && ev.situation && ev.situation.lastPlay;
+    if (!play) return '';
+    return [
+      play.id != null ? play.id : '',
+      play.sequenceNumber != null ? play.sequenceNumber : '',
+      play.text || play.shortText || '',
+      play.awayScore != null ? play.awayScore : '',
+      play.homeScore != null ? play.homeScore : '',
+      play.scoringPlay === true ? '1' : '0',
+      play.isPenalty === true ? '1' : '0',
+      play.type && play.type.text || ''
+    ].join('|');
+  }
+
+  function recordFastHeaderPlay(ev) {
+    if (!ev || ev.id == null) return false;
+    const id = String(ev.id);
+    const signature = fastHeaderPlaySignature(ev);
+    if (state.fastPlaySignatures[id] === signature) return false;
+    state.fastPlaySignatures[id] = signature;
+    return true;
+  }
+
+  /*
+   * The compact header is the fastest provider lane available to this static
+   * client, but it does not always carry enough prior-play context to resolve
+   * a scoring ruling. On a newly published scoring play or a source-classified
+   * booth event, start that one game's full detail request immediately instead
+   * of waiting for the next one-second all-games cycle. Once cached context is
+   * available, ordinary unrelated flags are deliberately skipped.
+   *
+   * This is a one-shot, per changed header play. It does not turn the public
+   * endpoint into an unbounded sub-second detail poll, and the shared
+   * in-flight request guard still prevents duplicate requests.
+   */
+  function headerNeedsImmediateRulingDetail(ev) {
+    const play = ev && ev.situation && ev.situation.lastPlay;
+    if (!play) return false;
+    // NFL replay officials confirm every scoring play and try attempt. A
+    // provider scoring flag is therefore worth reconciling immediately even
+    // before a review/penalty line is published.
+    if (play.scoringPlay === true) return true;
+    if (!NFLMap.classifyBooth(play)) return false;
+
+    const cached = ev.id != null ? state.daySummaries[ev.id] : null;
+    // With no play-by-play context yet, a provider-classified ruling is the
+    // safest available reason to fetch the initial detail snapshot.
+    if (!cached || !cached.drives) return true;
+
+    const playId = play.id != null ? String(play.id) : '';
+    return NFLMap.scoringRulingEvents(cached.drives, play).some(function (event) {
+      if (!event || !event.scoringRuling) return false;
+      return event.live || (!!playId && event.id != null && String(event.id) === playId);
+    });
+  }
+
   function refreshLiveScores() {
     // This endpoint is for ESPN's current live header; it is not a substitute
     // for browsing an arbitrary historical day, and is skipped when nothing
     // selected is live.
     if (!state.events.some(function (ev) { return ev.status && ev.status.state === 'in'; })) return;
     // A timer tick never starts a second league-wide request while the prior
-    // one is still on the wire. This bounds traffic and prevents an older
-    // response from racing a newer one.
-    if (state.liveHeaderRequest) return;
+    // one is still on the wire. Remember one missed tick so a slow response
+    // can be followed immediately rather than idling until the next interval
+    // boundary; requests still never overlap.
+    if (state.liveHeaderRequest) {
+      state.liveHeaderQueued = true;
+      return;
+    }
+    let headerSucceeded = false;
     const stamp = toYMD(state.date);
     // `cache: no-store` controls the browser cache. A unique, ignored query
     // value also prevents a query-keyed intermediary from reusing the prior
@@ -685,6 +755,7 @@
     state.liveHeaderRequest = request;
     request
       .then(function (data) {
+        headerSucceeded = true;
         if (toYMD(state.date) !== stamp) return;
         const byId = {};
         liveHeaderEvents(data).forEach(function (event) {
@@ -692,24 +763,64 @@
         });
         let cardsChanged = false;
         let openChanged = false;
+        let fastPlayChanged = false;
+        const immediateDetailIds = [];
+        const cardSignatures = {};
         state.events.forEach(function (ev) {
           const source = byId[String(ev.id)];
           if (!source) return;
-          const before = eventCardSignature(ev);
+          cardSignatures[String(ev.id)] = eventCardSignature(ev);
+          const priorScore = eventScoreSignature(ev);
           const competition = headerCompetition(source);
           if (!competition) return;
           hydrateEventFromSummary(ev, { header: { competitions: [competition] } });
-          if (eventCardSignature(ev) !== before) {
-            cardsChanged = true;
-            if (current() === ev) openChanged = true;
+          const scoreChanged = priorScore !== eventScoreSignature(ev);
+          // The 250 ms header is the fast lane for a new scoring review or
+          // penalty. It updates the all-games scoring watch immediately; a
+          // scoring-relevant change (or a score change with no usable last
+          // play) also starts targeted reconciliation now.
+          const playChanged = recordFastHeaderPlay(ev);
+          if (playChanged) fastPlayChanged = true;
+          if (scoreChanged || (playChanged && headerNeedsImmediateRulingDetail(ev))) {
+            immediateDetailIds.push(ev.id);
           }
+        });
+        // Do not wait for the next one-second scheduler tick when the header
+        // just published a possible scoring ruling or score change. This call
+        // is nonblocking and skips any game whose ordinary periodic detail
+        // request is already in flight.
+        if (immediateDetailIds.length) refreshDayBooth(immediateDetailIds);
+        if (fastPlayChanged) {
+          renderDayBooth();
+          // The fast header is also useful while a listener is watching one
+          // of the focused ruling categories: render that view immediately,
+          // while the targeted or one-second play-by-play response reconciles it.
+          if (state.summary && current() && RULING_TABS.indexOf(state.activeTab) >= 0) {
+            renderGameHeader();
+            renderTabContent();
+            state.lastGameContentRenderAt = Date.now();
+          }
+        }
+        state.events.forEach(function (ev) {
+          if (cardSignatures[String(ev.id)] === eventCardSignature(ev)) return;
+          cardsChanged = true;
+          if (current() === ev) openChanged = true;
         });
         if (cardsChanged && !$('scoreboard-view').classList.contains('hidden')) renderScoreboard();
         if (openChanged && current()) renderGameHeader();
       })
       .catch(function () { /* the detail/scoreboard paths remain fallbacks */ })
       .then(function () {
-        if (state.liveHeaderRequest === request) state.liveHeaderRequest = null;
+        if (state.liveHeaderRequest !== request) return;
+        state.liveHeaderRequest = null;
+        const runQueuedPoll = state.liveHeaderQueued;
+        state.liveHeaderQueued = false;
+        // When a request lasted beyond a 250 ms tick, begin the one queued
+        // poll as soon as this successful reply has cleared. Do not schedule a
+        // hidden-tab retry or turn a failure into a tight retry loop.
+        if (runQueuedPoll && headerSucceeded && document.visibilityState !== 'hidden') {
+          refreshLiveScores();
+        }
       });
   }
 
@@ -729,19 +840,29 @@
   }
 
   /*
-   * Fetch the play-by-play of every game that has (or had) action:
-   * live games on every one-second review cycle, then one final snapshot after
-   * the scoreboard reports the game as finished. Each response updates cached
-   * data and the review feeds; larger non-review tabs repaint at most every 5s.
+   * Fetch play-by-play for every selected-day game that has (or had) action:
+   * live games on every one-second scoring-rulings cycle, an immediate
+   * targeted pass after a scoring-relevant header change, then one final
+   * snapshot after the scoreboard reports it finished. Each response updates
+   * cached data and the focused watch; larger non-ruling tabs repaint at most
+   * every five seconds. The interval is an attempted client schedule, not an
+   * upstream-data latency guarantee.
    */
-  function refreshDayBooth() {
+  function refreshDayBooth(targetEventIds) {
     if (!state.events.length) {
       renderDayBooth();
       return;
     }
+    const targetIds = Array.isArray(targetEventIds) && targetEventIds.length
+      ? targetEventIds.reduce(function (set, id) {
+        if (id != null) set[String(id)] = true;
+        return set;
+      }, {})
+      : null;
     const stamp = toYMD(state.date);
     const jobs = [];
     state.events.forEach(function (ev) {
+      if (targetIds && (!ev.id || !targetIds[String(ev.id)])) return;
       if (!ev.id || !dayBoothScannable(ev)) return;
       if (state.summaryRequests[ev.id]) return;
       const st = ev.status && ev.status.state;
@@ -789,10 +910,9 @@
   }
 
   /*
-   * Browsers block unsolicited audio until the listener has interacted with
-   * the page. A gesture unlocks Web Audio; later live booth updates can then
-   * announce challenges, replay reviews, and under-review plays. Penalties are
-   * deliberately excluded here.
+   * Browsers may block audio until the listener has interacted with the page.
+   * A gesture unlocks Web Audio for a later confirmed scoring nullification;
+   * pending reviews, challenges, flags, and integrity checks never play sound.
    */
   function unlockBoothAudio() {
     if (state.audioContext || typeof AudioContext === 'undefined') return;
@@ -810,7 +930,10 @@
    * "droplet" plips so it clearly reads as water. This replaced an earlier
    * 180 Hz sawtooth buzzer that was unpleasant to hear repeatedly.
    */
-  function playBoothAlert() {
+  function playBoothAlert(events) {
+    // Keep the sound primitive itself outcome-gated as a second line of
+    // defense. It is invoked with newly discovered mapper records below.
+    if (!(events || []).some(confirmedNullifiedScoringEvent)) return;
     const ctx = state.audioContext;
     if (!ctx) return;
     try {
@@ -890,29 +1013,188 @@
   function toggleBoothSound() {
     state.soundEnabled = !state.soundEnabled;
     saveBoothSoundPref();
-    renderDayBooth(); // refresh the button label/state in the booth header
-    // The click is itself a user gesture, so it can unlock Web Audio and play
-    // the exact same rain alert — the button doubles as a sound test.
+    renderDayBooth(); // refresh the button label/state in the watch header
+    // This user gesture can unlock Web Audio for a later *real* alert. It
+    // intentionally does not play a preview: sound is reserved for a
+    // confirmed nullified scoring play.
     unlockBoothAudio();
     if (state.audioContext && state.audioContext.state === 'suspended') {
       state.audioContext.resume();
     }
-    playBoothAlert();
+  }
+
+  function nullificationNotificationBody(event) {
+    const scoring = event && (event.scoringPlay || event.relatedScoringPlay);
+    const type = scoring && scoring.scoreLabel ? scoring.scoreLabel : 'Scoring play';
+    const game = event && event.shortName ? event.shortName : 'NFL game';
+    const detail = event && event.removesPoints && event.pointsRemoved
+      ? ' ' + event.pointsRemoved + ' point' + (event.pointsRemoved === 1 ? '' : 's') + ' removed.'
+      : ' Source text reports the score was nullified.';
+    return game + ' — ' + type + ' nullified.' + detail;
+  }
+
+  function notifyNullifiedScoringPlays(events) {
+    // Do not request permission or prompt the user. If the browser has already
+    // granted desktop notifications, use that channel only for a confirmed
+    // nullified score; otherwise the visual feed remains the notification.
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    (events || []).forEach(function (event) {
+      if (!confirmedNullifiedScoringEvent(event)) return;
+      try {
+        new Notification('NFL scoring play nullified', {
+          body: nullificationNotificationBody(event),
+          tag: 'nfl-nullified-' + scoringIdentity(event),
+          renotify: true
+        });
+      } catch (e) { /* desktop notifications are optional enhancement */ }
+    });
+  }
+
+  function primeScoringAlerts(events) {
+    (events || []).forEach(function (event) {
+      if (!confirmedNullifiedScoringEvent(event)) return;
+      const key = scoringIdentity(event);
+      if (key) state.alertedScoringKeys[key] = true;
+    });
   }
 
   function announceNewBoothEvents(fresh) {
-    let shouldAlert = false;
+    const announced = [];
     (fresh || []).forEach(function (event) {
-      const key = event && event.key != null ? String(event.key) : '';
-      if (!key || state.alertedBoothKeys[key]) return;
-      state.alertedBoothKeys[key] = true;
-      // The alert sound is reserved for nullifications: a touchdown, field goal,
-      // PAT or 2-point conversion wiped out, or points ESPN took off the
-      // running score. Ordinary flags, challenges and pending reviews stay
-      // silent — they are still listed in the feed.
-      if (boothEventNullified(event)) shouldAlert = true;
+      // Pending, retained and integrity rows are intentionally silent.
+      if (!confirmedNullifiedScoringEvent(event)) return;
+      const key = scoringIdentity(event);
+      if (!key || state.alertedScoringKeys[key]) return;
+      state.alertedScoringKeys[key] = true;
+      announced.push(event);
     });
-    if (shouldAlert && state.soundEnabled) playBoothAlert();
+    if (!announced.length) return;
+    // One sound per completed polling pass even if the source publishes a
+    // pending row and a replay verdict together for the same scoring play.
+    if (state.soundEnabled) playBoothAlert(announced);
+    notifyNullifiedScoringPlays(announced);
+  }
+
+  /*
+   * The day-wide feed is deliberately narrower than the per-game tracking
+   * views. We still map every scoring-linked potential/ruling on each fast
+   * response, but pass only an evidence-backed NULLIFIED record into this
+   * all-games feed. Source irregularities are kept in a separate audit tab.
+   */
+  function dayWatchGames() {
+    return dayBoothGames().map(function (ev) {
+      const cached = state.daySummaries[ev.id] || null;
+      const cachedPlay = cached && cached.situation && cached.situation.lastPlay;
+      // The 250 ms header can be newer than the cached full summary.
+      const lastPlay = (ev.situation && ev.situation.lastPlay) || cachedPlay || null;
+      const sourceEvents = NFLMap.scoringWatchEvents(cached && cached.drives, lastPlay)
+        .map(function (event) {
+          const isFastHeaderPlay = !!(lastPlay && event.id != null && lastPlay.id != null &&
+            String(event.id) === String(lastPlay.id));
+          return Object.assign({}, event, {
+            sourceLane: isFastHeaderPlay ? 'fast-header' : 'play-by-play'
+          });
+        });
+
+      // More than one source record can describe one scoring play. The day
+      // feed represents that play once, preferring its later verdict.
+      const nullified = uniqueScoringEvents(sourceEvents, confirmedNullifiedScoringEvent);
+      const audit = sourceEvents.filter(function (event) {
+        return !!(event && (event.irregularity || event.scoringWatch === 'irregular' ||
+          event.kind === 'integrity'));
+      });
+      const latestNullified = nullified.length ? nullified[nullified.length - 1] : null;
+      // Card badges remain outcome-only: a potential or audit record cannot
+      // make a card look like points were removed.
+      state.dayBoothNullified[ev.id] = latestNullified
+        ? {
+          removesPoints: !!latestNullified.removesPoints,
+          points: latestNullified.pointsRemoved || 0
+        }
+        : null;
+
+      return {
+        id: ev.id,
+        shortName: ev.shortName ||
+          (ev.away && ev.home ? ev.away.abbr + ' @ ' + ev.home.abbr : ''),
+        awayAbbr: (ev.away && ev.away.abbr) || '',
+        homeAbbr: (ev.home && ev.home.abbr) || '',
+        date: ev.date || null,
+        live: !!(ev.status && ev.status.state === 'in'),
+        events: sourceEvents,
+        pending: sourceEvents.filter(function (event) {
+          return !!(event && event.scoringWatch === 'pending');
+        }),
+        nullified: nullified,
+        audit: audit
+      };
+    });
+  }
+
+  function asDayFeed(games, field) {
+    return NFLMap.dayBoothFeed((games || []).map(function (game) {
+      return Object.assign({}, game, { events: game[field] || [] });
+    }));
+  }
+
+  function pendingRulingMap(items) {
+    const map = {};
+    (items || []).forEach(function (event) {
+      if (event && event.key != null && event.scoringWatch === 'pending') {
+        map[String(event.key)] = event;
+      }
+    });
+    return map;
+  }
+
+  function pendingDisappearanceAudits(previous, current) {
+    const currentKeys = {};
+    const currentScoring = {};
+    (current || []).forEach(function (event) {
+      if (!event) return;
+      if (event.key != null) currentKeys[String(event.key)] = true;
+      const scoringKey = scoringIdentity(event);
+      if (scoringKey) currentScoring[scoringKey] = true;
+    });
+    return Object.keys(previous || {}).reduce(function (out, key) {
+      const prior = previous[key];
+      // If a revised source row still identifies the same scoring play, it is
+      // a resolved/updated ruling rather than a provider disappearance.
+      if (!prior || currentKeys[key] || currentScoring[scoringIdentity(prior)]) return out;
+      out.push(Object.assign({}, prior, {
+        kind: 'integrity',
+        heading: 'Pending scoring ruling no longer in source',
+        scoringWatch: 'irregular',
+        irregularity: true,
+        nullified: false,
+        removesPoints: false,
+        pointsRemoved: 0,
+        removedTeam: '',
+        nullificationEvidence: 'pending source ruling disappeared before a final outcome'
+      }));
+      return out;
+    }, []);
+  }
+
+  function activeDisappearanceAudits(existing, additions, current) {
+    const currentKeys = {};
+    const currentScoring = {};
+    (current || []).forEach(function (event) {
+      if (!event) return;
+      if (event.key != null) currentKeys[String(event.key)] = true;
+      const scoringKey = scoringIdentity(event);
+      if (scoringKey) currentScoring[scoringKey] = true;
+    });
+    const seen = {};
+    return (existing || []).concat(additions || []).reduce(function (out, event) {
+      if (!event || (event.key != null && currentKeys[String(event.key)]) ||
+          currentScoring[scoringIdentity(event)]) return out;
+      const key = event.key != null ? String(event.key) : scoringIdentity(event);
+      if (key && seen[key]) return out;
+      if (key) seen[key] = true;
+      out.push(event);
+      return out;
+    }, []);
   }
 
   function renderDayBooth() {
@@ -930,48 +1212,33 @@
       el.classList.remove('hidden');
     }
 
-    const fresh = NFLMap.dayBoothFeed(dayBoothGames().map(function (ev) {
-      const cached = state.daySummaries[ev.id] || null;
-      const cachedPlay = cached && cached.situation && cached.situation.lastPlay;
-      const lastPlay = cachedPlay || (ev.situation && ev.situation.lastPlay) || null;
-      const events = NFLMap.boothEvents(cached && cached.drives, lastPlay);
-      // The newest nullification drives the game card's NULLIFIED /
-      // PTS REMOVED badge (events are sorted by sequence, newest last).
-      let lastNullified = null;
-      for (let i = events.length - 1; i >= 0; i -= 1) {
-        if (boothEventNullified(events[i])) { lastNullified = events[i]; break; }
-      }
-      state.dayBoothNullified[ev.id] = lastNullified
-        ? {
-          removesPoints: !!lastNullified.removesPoints,
-          points: lastNullified.pointsRemoved || 0
-        }
-        : null;
-      return {
-        id: ev.id,
-        shortName: ev.shortName ||
-          (ev.away && ev.home ? ev.away.abbr + ' @ ' + ev.home.abbr : ''),
-        awayAbbr: (ev.away && ev.away.abbr) || '',
-        homeAbbr: (ev.home && ev.home.abbr) || '',
-        date: ev.date || null,
-        live: !!(ev.status && ev.status.state === 'in'),
-        events: events
-      };
-    }));
+    const games = dayWatchGames();
+    const freshAll = asDayFeed(games, 'events');
+    const freshPending = asDayFeed(games, 'pending');
+    const freshNullified = asDayFeed(games, 'nullified');
+    const sourceAudit = asDayFeed(games, 'audit');
+    const disappearedAudit = pendingDisappearanceAudits(state.dayPendingRulings, freshAll);
+    const activeDisappearances = activeDisappearanceAudits(
+      state.dayDisappearanceAuditItems, disappearedAudit, freshAll);
+    const freshAudit = sourceAudit.concat(activeDisappearances);
+    state.dayPendingRulings = pendingRulingMap(freshPending);
+    state.dayDisappearanceAuditItems = activeDisappearances;
 
-    // Keep discovery order, append new messages, and replace an existing item
-    // when ESPN updates that same play with the review result. The first load
-    // establishes history silently; only later discoveries can alert.
+    // This is a live outcome feed, not a historical transcript: a row stays
+    // visible only while the current provider snapshot still calls it
+    // nullified. First paint is silent; later new nullifications are the only
+    // events allowed through alerting.
     if (!state.dayFeed.primed) {
-      state.dayFeed.items = fresh;
       state.dayFeed.primed = true;
-      fresh.forEach(function (event) {
-        if (event && event.key != null) state.alertedBoothKeys[String(event.key)] = true;
-      });
+      primeScoringAlerts(freshNullified);
     } else {
-      announceNewBoothEvents(fresh);
-      state.dayFeed.items = NFLMap.reconcileDayBoothFeed(state.dayFeed.items, fresh);
+      announceNewBoothEvents(freshNullified);
     }
+    state.dayFeed.items = freshNullified;
+    // Audit items reflect current source irregularities plus a pending record
+    // that just disappeared without an equivalent result. They remain silent
+    // and never enter the confirmed-nullification stream.
+    state.dayAuditItems = freshAudit;
 
     const feed = el.querySelector('.day-feed');
     const prevScroll = feed ? feed.scrollTop : 0;
@@ -995,35 +1262,47 @@
     return live;
   }
 
+  function dayWatchTabsHTML(tab, nullifiedCount, auditCount) {
+    const counts = { nullified: nullifiedCount, integrity: auditCount };
+    return DAY_WATCH_TABS.map(function (pair) {
+      const id = pair[0];
+      const count = counts[id] || 0;
+      return '<button type="button" class="booth-filter day-watch-tab' +
+        (tab === id ? ' active' : '') + '" data-day-tab="' + id + '">' +
+        esc(pair[1]) + ' · ' + count + '</button>';
+    }).join('');
+  }
+
   function dayBoothHTML() {
-    const filter = state.dayBoothFilter || 'all';
-    const items = state.dayFeed.items || [];
+    const tab = state.dayWatchTab === 'integrity' ? 'integrity' : 'nullified';
+    const nullifiedItems = state.dayFeed.items || [];
+    const auditItems = state.dayAuditItems || [];
+    const items = tab === 'integrity' ? auditItems : nullifiedItems;
     const liveNow = liveGamesNow();
-    const counts = boothKindCounts(items);
-    const visible = items.filter(function (e) {
-      return boothEventShown(e, filter);
-    });
-
-    const filters = boothFiltersHTML(filter, counts, 'data-day-filter', ' day-filter', DAY_BOOTH_FILTERS);
-
     const scannable = state.events.filter(dayBoothScannable).length;
     const scanned = Object.keys(state.daySummaries).length;
     const liveCount = state.events.filter(function (e) {
       return e.status && e.status.state === 'in';
     }).length;
-    const foot =
-      'Every flag &amp; review from all of today&rsquo;s games · pulled from ESPN play-by-play · ' +
-      'tracks score before &rarr; during &rarr; after when a nullified score comes off the board · ' +
-      'nullified &amp; red zone cover TD, FG, PAT &amp; 2-pt only · score/status ' +
-      LIVE_SCORE_SECONDS + 's · play-by-play ' + LIVE_REVIEW_SECONDS + 's' +
+    const tabs = dayWatchTabsHTML(tab,
+      uniqueScoringEvents(nullifiedItems, confirmedNullifiedScoringEvent).length,
+      auditItems.length);
+    const baseFoot =
+      'TD (offense / defense / special teams), FG, PAT, 2-point and safety · fast last-play header ' +
+      LIVE_SCORE_SECONDS + 's attempted · full play-by-play ' + LIVE_REVIEW_SECONDS + 's' +
       (scannable ? ' · games scanned ' + scanned + ' of ' + scannable : '') +
       (liveCount ? ' · ' + liveCount + ' game' + (liveCount === 1 ? '' : 's') + ' live' : '');
+    const title = tab === 'integrity'
+      ? 'Source data checks · all games'
+      : 'Confirmed nullified scoring plays · all games';
+    const foot = tab === 'integrity'
+      ? 'Current provider score irregularities and unresolved disappeared pending records · alerts are suppressed · ' + baseFoot
+      : 'Only confirmed, scoring-linked nullifications appear here · potential and retained rulings remain in their separate game tabs · ' + baseFoot;
 
-    // Top banner listing the day's nullified scores – the only thing these
-    // feeds track beyond the plain flag/review log.
-    const nullifiedAll = items.filter(boothEventNullified);
+    // Count distinct scoring plays, not every row in a review sequence.
+    const nullifiedAll = uniqueScoringEvents(nullifiedItems, confirmedNullifiedScoringEvent);
     let topBanner = '';
-    if (nullifiedAll.length) {
+    if (tab === 'nullified' && nullifiedAll.length) {
       const summary = nullifiedAll.slice(0, 3).map(function (e) {
         const pts = e.removesPoints ? ' ' + e.pointsRemoved + 'pts' : '';
         return esc(e.shortName + ':' + pts);
@@ -1031,27 +1310,21 @@
       const more = nullifiedAll.length > 3 ? ' +' + (nullifiedAll.length - 3) + ' more' : '';
       topBanner = '<div class="booth-banner removed-banner day-removed-banner" role="status">' +
         '<span class="badge removed">' + nullifiedAll.length + ' NULLIFIED</span>' +
-        '<span>Scores taken off the board: ' + summary + more + ' – filter Nullified.</span>' +
+        '<span>Provider-published nullification evidence: ' + summary + more + '.</span>' +
       '</div>';
     }
 
     let body;
-    if (!visible.length) {
-      body = '<div class="empty booth-empty">' +
-        (scanned < scannable
-          ? 'Scanning today&rsquo;s games for flags and reviews&hellip;'
-          : (filter === 'redzone' && counts.all
-            ? 'No nullified scores in the red zone (the opponent&rsquo;s 20 or inside) ' +
-              'today &mdash; no touchdown, field goal, PAT or 2-pt conversion has been ' +
-              'wiped out from there.'
-            : (filter === 'nullified' && counts.all
-              ? 'No nullified scores today &mdash; no touchdown, field goal, PAT or ' +
-                '2-pt conversion has been taken off the board.'
-              : 'No flags or reviews on this day yet &mdash; kickoff hasn&rsquo;t happened, or the games were clean.'))) +
-        '</div>';
+    if (!items.length) {
+      const empty = tab === 'integrity'
+        ? 'No current provider score irregularities need review.'
+        : (scanned < scannable
+          ? 'Scanning today&rsquo;s games for confirmed nullified scoring plays&hellip;'
+          : 'No confirmed nullified scoring plays today &mdash; no touchdown, field goal, try, or safety has been taken off the board.');
+      body = '<div class="empty booth-empty">' + empty + '</div>';
     } else {
-      body = '<div class="day-feed" role="log" aria-live="polite" aria-relevant="additions">' +
-        visible.map(function (e) {
+      body = '<div class="day-feed" role="log" aria-live="off">' +
+        items.map(function (e) {
           return dayBoothMsgHTML(e, !!liveNow[e.gameId]);
         }).join('') +
       '</div>';
@@ -1059,13 +1332,21 @@
 
     const soundOn = !!state.soundEnabled;
     const soundTitle = soundOn
-      ? 'Alert sound ON - a gentle rain sound plays only when a score is nullified. Click to mute.'
-      : 'Alert sound OFF - click to enable and test the rain alert sound.';
+      ? 'Alert sound ON — it plays only after a confirmed nullified scoring play. Click to mute.'
+      : 'Alert sound OFF — click to enable alerts for confirmed nullified scoring plays.';
+    const provenance = '<div class="watch-provenance">' +
+      '<span class="source-tag">LIVE PROVIDER: ESPN GAMECAST</span>' +
+      '<span>Fast header detection is reconciled against full play-by-play. ' +
+      '<a href="https://operations.nfl.com/rules-officiating/2026-nfl-rulebook" target="_blank" rel="noopener noreferrer">NFL rules source</a> ' +
+      'is used for scoring/replay criteria; this app does not claim a direct NFL officiating feed. ' +
+      '<a href="verification.md" target="_blank" rel="noopener noreferrer">Field verification &amp; limits</a>. ' +
+      'Polling is attempted on a schedule, not a freshness guarantee: upstream publication, network/rate limits, background-tab scheduling, and browser autoplay can delay an update or sound.</span>' +
+    '</div>';
     return '<div class="booth day-booth">' +
       '<div class="booth-head">' +
         '<div class="booth-head-main">' +
-          '<div class="booth-title">Live booth &middot; flags &amp; reviews &middot; all games</div>' +
-          '<div class="booth-sub">' + foot + '</div>' +
+          '<div class="booth-title">' + esc(title) + '</div>' +
+          '<div class="booth-sub">' + esc(foot) + '</div>' +
         '</div>' +
         '<button type="button" class="day-sound-btn' + (soundOn ? ' on' : '') +
           '" aria-pressed="' + (soundOn ? 'true' : 'false') + '"' +
@@ -1073,8 +1354,9 @@
           (soundOn ? '&#128276; Sound On' : '&#128263; Sound Off') +
         '</button>' +
       '</div>' +
+      provenance +
+      '<div class="booth-filters day-watch-tabs">' + tabs + '</div>' +
       topBanner +
-      '<div class="booth-filters">' + filters + '</div>' +
       body +
     '</div>';
   }
@@ -1083,8 +1365,39 @@
     return String(away != null ? away : 0) + '–' + String(home != null ? home : 0);
   }
 
+  function scoringWatchNoteHTML(e) {
+    if (!e) return '';
+    const scoring = e.scoringPlay || e.relatedScoringPlay || null;
+    const scoreLabel = scoring && scoring.scoreLabel ? scoring.scoreLabel : 'scoring play';
+    const sourcePlay = scoring && scoring.text
+      ? '<span class="booth-note">Scoring play: ' + esc(scoring.text) + '</span>'
+      : '';
+    if (e.irregularity || e.scoringWatch === 'irregular') {
+      const detail = e.nullificationEvidence === 'pending source ruling disappeared before a final outcome'
+        ? 'the provider no longer includes the pending scoring ruling in its latest play-by-play'
+        : 'the provider lowered a running score, but no contiguous scoring ruling identifies why';
+      return '<span class="booth-note integrity-note">Data check: ' + esc(detail) +
+        '. Alert suppressed; review the source record.</span>';
+    }
+    if (e.scoringWatch === 'pending') {
+      return '<span class="booth-note pending-note">Potential ' + esc(scoreLabel) +
+        ' ruling — awaiting a final source update. No alert has been sent.</span>' + sourcePlay;
+    }
+    if (e.scoringWatch === 'retained') {
+      return '<span class="booth-note retained-note">No score rollback was published before the source moved on. This is not a nullification.</span>' + sourcePlay;
+    }
+    if (boothEventNullified(e)) {
+      const evidence = e.nullificationEvidence
+        ? '<span class="booth-note">Evidence: ' + esc(e.nullificationEvidence) + '.</span>'
+        : '';
+      return evidence + sourcePlay;
+    }
+    return sourcePlay;
+  }
+
   function boothScoreTrailHTML(e, awayAbbr, homeAbbr) {
-    if (e.beforeAwayScore == null || e.duringAwayScore == null || e.afterAwayScore == null) return '';
+    const note = scoringWatchNoteHTML(e);
+    if (e.beforeAwayScore == null || e.duringAwayScore == null || e.afterAwayScore == null) return note;
     const before = scorePair(e.beforeAwayScore, e.beforeHomeScore);
     const during = scorePair(e.duringAwayScore, e.duringHomeScore);
     const after = scorePair(e.afterAwayScore, e.afterHomeScore);
@@ -1100,9 +1413,6 @@
     const nullifiedBadge = (!e.removesPoints && boothEventNullified(e))
       ? '<span class="badge removed">NULLIFIED</span>'
       : '';
-    const related = boothEventNullified(e) && e.relatedScoringPlay && e.relatedScoringPlay.text
-      ? '<span class="booth-note">' + esc(e.relatedScoringPlay.text) + '</span>'
-      : '';
     const stateCls = boothEventNullified(e) ? ' removed' : '';
     return '<span class="booth-state' + stateCls + '">' +
       '<span class="bsh-label">Score</span>' +
@@ -1114,7 +1424,31 @@
       removedBadge +
       nullifiedBadge +
     '</span>' +
-    related;
+    note;
+  }
+
+  function scoringWatchChipHTML(e) {
+    if (!e) return '';
+    const watch = e.scoringWatch || (boothEventNullified(e) ? 'nullified' : '');
+    if (!watch) return '';
+    const label = SCORING_WATCH_LABEL[watch] || watch;
+    const cls = watch === 'nullified' ? ' removed' :
+      (watch === 'pending' ? ' pending-score' :
+        (watch === 'retained' ? ' retained-score' : ' integrity'));
+    const title = watch === 'pending'
+      ? 'Potential scoring ruling. It is not a nullification and will not alert.'
+      : (watch === 'retained'
+        ? 'The source moved on without a score rollback.'
+        : (watch === 'irregular'
+          ? 'Source score correction needs review. Alert suppressed.'
+          : 'Confirmed nullified scoring play.'));
+    return '<span class="badge watch-status' + cls + '" title="' + esc(title) + '">' +
+      esc(label) + '</span>';
+  }
+
+  function sourceLaneChipHTML(e) {
+    if (!e || e.sourceLane !== 'fast-header') return '';
+    return '<span class="badge source-lane" title="Detected on the fast live-header lane; full play-by-play will reconcile it.">FAST</span>';
   }
 
   function dayBoothMsgHTML(e, liveNow) {
@@ -1144,10 +1478,15 @@
       ? '<span class="badge rz" title="Play started in the red zone (opponent&rsquo;s 20 or inside)">RZ</span>'
       : '';
     const isNullified = boothEventNullified(e);
-    const nullChip = (isNullified && !e.removesPoints)
-      ? '<span class="badge removed" title="A score was nullified on this play">NULLIFIED</span>'
-      : '';
+    const watchChip = scoringWatchChipHTML(e);
+    const sourceLane = sourceLaneChipHTML(e);
     const state = boothScoreTrailHTML(e, e.awayAbbr, e.homeAbbr);
+    // The all-games feed links directly to a focused category. A red-zone
+    // nullification preserves its red-zone route; source audit rows never
+    // masquerade as an outcome.
+    const targetTab = e.irregularity || e.scoringWatch === 'irregular' || e.kind === 'integrity'
+      ? 'integrity'
+      : (isNullified && e.redZone ? 'redzone' : 'nullified');
     const aria = esc(e.shortName) + ', ' + esc(kind) + ': ' + esc(e.text) +
       (e.removesPoints ? ', removed ' + esc(e.pointsRemoved) + ' points' : '') +
       (isNullified && !e.removesPoints ? ', score nullified' : '') +
@@ -1156,13 +1495,18 @@
     return '' +
       '<button type="button" class="booth-msg day-msg ' + esc(e.kind) +
         (isNullified ? ' pts-removed' : '') +
-        '" data-id="' + esc(e.gameId) + '" aria-label="' + aria + '">' +
+        (e.scoringWatch === 'pending' ? ' scoring-pending' : '') +
+        (e.scoringWatch === 'retained' ? ' scoring-retained' : '') +
+        (e.irregularity ? ' scoring-integrity' : '') +
+        '" data-id="' + esc(e.gameId) + '" data-ruling-tab="' + targetTab +
+        '" aria-label="' + aria + '">' +
         '<span class="booth-msg-top">' +
           '<span class="day-game">' + esc(e.shortName) + '</span>' +
           liveTag +
           '<span class="badge ' + esc(e.kind) + '">' + esc(kind) + '</span>' +
           rz +
-          nullChip +
+          watchChip +
+          sourceLane +
           (result ? '<span class="badge result ' + esc(e.result) + '">' + esc(result) + '</span>' : '') +
           '<span class="booth-when">' + esc(when) + '</span>' +
           (score ? '<span class="booth-score">' + score + '</span>' : '') +
@@ -1184,10 +1528,6 @@
     state.summary = null;
     state.activeTab = tab || 'plays';
     state.lastGameContentRenderAt = 0;
-    state.boothFilter = 'all';
-    state.redZoneFilter = 'all';
-    state.seenBoothIds = {};
-    state.boothPrimed = false;
     showGameView();
     renderTabs();
     renderGameHeader();
@@ -1305,20 +1645,22 @@
     }
     if (state.activeTab === 'plays') el.innerHTML = playsHTML();
     else if (state.activeTab === 'drives') el.innerHTML = drivesHTML();
-    else if (state.activeTab === 'booth') renderBooth(el);
-    else if (state.activeTab === 'redzone') renderRedZone(el);
+    else if (RULING_TABS.indexOf(state.activeTab) >= 0) renderRulingCategory(el, state.activeTab);
     else if (state.activeTab === 'team') el.innerHTML = teamStatsHTML();
     else if (state.activeTab === 'players') el.innerHTML = playerStatsHTML();
   }
 
   function liveLastPlay() {
-    let sit = summarySituation(state.summary);
-    if ((!sit || !sit.lastPlay) && current()) sit = current().situation;
+    // The current event receives the 250 ms header updates. Prefer it over the
+    // cached full summary so an in-progress scoring ruling appears in the UI
+    // before the next one-second play-by-play reconciliation.
+    let sit = current() && current().situation;
+    if ((!sit || !sit.lastPlay) && state.summary) sit = summarySituation(state.summary);
     return (sit && sit.lastPlay) ? sit.lastPlay : null;
   }
 
   function currentBoothEvents() {
-    return NFLMap.boothEvents(
+    return NFLMap.scoringWatchEvents(
       state.summary && state.summary.drives,
       liveLastPlay()
     );
@@ -1327,22 +1669,106 @@
   function boothEventsById(events) {
     const map = {};
     (events || []).forEach(function (e) {
-      if (e && e.id != null) map[String(e.id)] = e;
+      if (!e) return;
+      if (e.id != null) map[String(e.id)] = e;
+      // Highlight the original touchdown / safety / kick as well as the
+      // ruling record that removed it. A review often has its own play id.
+      if (boothEventNullified(e) && e.scoringPlay && e.scoringPlay.id != null) {
+        map[String(e.scoringPlay.id)] = e;
+      }
     });
     return map;
   }
 
-  function renderBooth(el) {
-    const events = NFLMap.boothEvents(
-      state.summary && state.summary.drives,
-      liveLastPlay()
-    );
+  function rulingTabInfo(tab) {
+    const info = {
+      flags: {
+        title: 'Scoring-linked flags',
+        description: 'Penalty records tied by the provider to a scoring play',
+        empty: 'No scoring-linked flags are being tracked for this game.'
+      },
+      challenges: {
+        title: 'Scoring-linked challenges',
+        description: 'Coach challenge records tied by the provider to a scoring play',
+        empty: 'No scoring-linked challenges are being tracked for this game.'
+      },
+      replay: {
+        title: 'Scoring-linked replay',
+        description: 'Replay verdict records tied by the provider to a scoring play',
+        empty: 'No scoring-linked replay rulings are being tracked for this game.'
+      },
+      review: {
+        title: 'Scoring plays under review',
+        description: 'Active or published under-review records tied to a scoring play',
+        empty: 'No scoring-linked under-review records are being tracked for this game.'
+      },
+      nullified: {
+        title: 'Nullified scoring plays',
+        description: 'Confirmed only — explicit provider nullification evidence or an attributed score rollback',
+        empty: 'No confirmed nullified scoring plays for this game.'
+      },
+      redzone: {
+        title: 'Red zone nullified scores',
+        description: 'Confirmed nullifications on downs that started at the opponent’s 20 or inside',
+        empty: 'No confirmed nullified red-zone scores for this game.'
+      },
+      integrity: {
+        title: 'Source data checks',
+        description: 'Provider score irregularities that require review; these are not inferred outcomes',
+        empty: 'No current provider score irregularities need review for this game.'
+      }
+    };
+    return info[tab] || info.nullified;
+  }
+
+  function eventsForRulingTab(tab, allEvents) {
+    const events = allEvents || currentBoothEvents();
+    if (tab === 'flags') return events.filter(function (e) { return e && e.kind === 'penalty'; });
+    if (tab === 'challenges') return events.filter(function (e) { return e && e.kind === 'challenge'; });
+    if (tab === 'replay') return events.filter(function (e) { return e && e.kind === 'replay'; });
+    if (tab === 'review') return events.filter(function (e) { return e && e.kind === 'review'; });
+    if (tab === 'redzone') {
+      return uniqueScoringEvents(events, function (e) {
+        return !!(e && e.redZone && confirmedNullifiedScoringEvent(e));
+      });
+    }
+    if (tab === 'integrity') {
+      const sourceIssues = events.filter(function (e) {
+        return !!(e && (e.irregularity || e.scoringWatch === 'irregular' || e.kind === 'integrity'));
+      });
+      const game = current();
+      const disappearanceIssues = (state.dayDisappearanceAuditItems || []).filter(function (e) {
+        return !!(game && e && String(e.gameId) === String(game.id));
+      });
+      return sourceIssues.concat(disappearanceIssues);
+    }
+    return uniqueScoringEvents(events, confirmedNullifiedScoringEvent);
+  }
+
+  function nullifiedBannerHTML(events, redZone) {
+    const confirmed = uniqueScoringEvents(events, confirmedNullifiedScoringEvent);
+    if (!confirmed.length) return '';
+    const removedPts = confirmed.reduce(function (sum, e) {
+      return sum + (e.removesPoints ? Number(e.pointsRemoved) || 0 : 0);
+    }, 0);
+    const label = redZone ? ' NULLIFIED IN RZ' : ' NULLIFIED';
+    const sentence = redZone
+      ? confirmed.length + ' red zone scoring play(s) taken off the board'
+      : confirmed.length + ' confirmed scoring play(s) taken off the board';
+    return '<div class="booth-banner removed-banner" role="status">' +
+      '<span class="badge removed">' + confirmed.length + label + '</span>' +
+      '<span>' + sentence + (removedPts ? ' – ' + removedPts + ' pts removed' : '') + '.</span>' +
+    '</div>';
+  }
+
+  function renderRulingCategory(el, tab) {
+    const events = eventsForRulingTab(tab);
     const feed = el.querySelector('.booth-feed');
     const prevScroll = feed ? feed.scrollTop : 0;
     const nearBottom = !feed ||
       (feed.scrollHeight - feed.scrollTop - feed.clientHeight < 56);
 
-    el.innerHTML = boothHTML(events);
+    el.innerHTML = rulingCategoryHTML(tab, events);
 
     const feed2 = el.querySelector('.booth-feed');
     if (feed2) {
@@ -1351,86 +1777,24 @@
     }
   }
 
-  function boothHTML(events) {
-    const filter = state.boothFilter || 'all';
-    const counts = boothKindCounts(events);
-    const visible = events.filter(function (e) {
-      return boothEventShown(e, filter);
-    });
-
-    const newIds = [];
-    visible.forEach(function (e) {
-      const id = e.id != null ? String(e.id) : '';
-      if (!id) return;
-      if (state.boothPrimed && !state.seenBoothIds[id]) newIds.push(id);
-    });
-    if (!state.boothPrimed) {
-      events.forEach(function (e) {
-        if (e.id != null) state.seenBoothIds[String(e.id)] = true;
-      });
-      state.boothPrimed = true;
-    } else {
-      events.forEach(function (e) {
-        if (e.id != null) state.seenBoothIds[String(e.id)] = true;
-      });
-    }
-
-    const filters = boothFiltersHTML(filter, counts, 'data-booth-filter', '');
-
-    const lastPlay = liveLastPlay();
-    const lastText = lastPlay ? (lastPlay.text || lastPlay.shortText || '') : '';
-    const livePending = !!(current() && current().status && current().status.state === 'in' && lastPlay &&
-      (NFLMap.classifyBooth(lastPlay) === 'review' || NFLMap.boothResult(lastText) === 'pending'));
-    // A persistent banner whenever ANY event in the feed nullified a score,
-    // even if the live lastPlay is not currently under review.
-    const nullifiedEvents = events.filter(boothEventNullified);
-    const nullifiedBanner = (!livePending && nullifiedEvents.length)
-      ? '<div class="booth-banner removed-banner" role="status">' +
-          '<span class="badge removed">' + nullifiedEvents.length + ' NULLIFIED</span>' +
-          '<span>Score taken off the board – ' +
-            nullifiedEvents.map(function (e) {
-              if (!e.removesPoints) return esc(e.heading || 'nullified score');
-              const team = e.removedTeam === 'away' ? (current() && current().away ? current().away.abbr : 'AWAY')
-                : (current() && current().home ? current().home.abbr : 'HOME');
-              return esc(team + ' ' + e.pointsRemoved + 'pts');
-            }).join(', ') +
-          ' – switch to the Nullified filter.</span>' +
-        '</div>'
-      : '';
-
-    const underReviewBanner = livePending
-      ? '<div class="booth-banner" role="status">' +
-          '<span class="badge review">UNDER REVIEW</span>' +
-          '<span>' + esc(lastText) + '</span>' +
-        '</div>'
-      : '';
-
-    const banner = underReviewBanner + nullifiedBanner;
-
-    let body;
-    if (!visible.length) {
-      body = '<div class="empty booth-empty">No flags, challenges, or replay reviews in the play-by-play yet.</div>';
-    } else {
-      body = '<div class="booth-feed" role="log" aria-live="polite" aria-relevant="additions">' +
-        visible.map(function (e) {
-          return boothMsgHTML(e, newIds.indexOf(e.id != null ? String(e.id) : '') >= 0);
-        }).join('') +
-      '</div>';
-    }
-
-    // Literal arrows (not &rarr; entities): foot passes through esc() below.
+  function rulingCategoryHTML(tab, events) {
+    const info = rulingTabInfo(tab);
     const live = current() && current().status && current().status.state === 'in';
-    const foot = live
-      ? 'Live booth log · pulled from ESPN play-by-play · tracks score before → during → after when a nullified score comes off the board · ' +
-        LIVE_REVIEW_SECONDS + 's polling schedule'
-      : 'Booth log · pulled from ESPN play-by-play · tracks score before → during → after when a nullified score comes off the board · nullified covers TD, FG, PAT & 2-pt';
+    const cadence = live ? ' · refreshed on the ' + LIVE_REVIEW_SECONDS + 's full-play schedule' : '';
+    const banner = (tab === 'nullified' || tab === 'redzone')
+      ? nullifiedBannerHTML(events, tab === 'redzone')
+      : '';
+    const body = events.length
+      ? '<div class="booth-feed" role="log" aria-live="off">' +
+          events.map(function (e) { return boothMsgHTML(e, false); }).join('') +
+        '</div>'
+      : '<div class="empty booth-empty">' + esc(info.empty) + '</div>';
 
-    return '<div class="booth">' +
+    return '<div class="booth ruling-category ruling-' + esc(tab) + '">' +
       '<div class="booth-head">' +
-        '<div class="booth-title">Flags, challenges &amp; replay reviews</div>' +
-        '<div class="booth-sub">' + esc(foot) + '</div>' +
+        '<div class="booth-title">' + esc(info.title) + '</div>' +
+        '<div class="booth-sub">' + esc(info.description + ' · scoring-linked only' + cadence) + '</div>' +
       '</div>' +
-      '<div class="booth-filters">' + filters + '</div>' +
       banner +
       body +
     '</div>';
@@ -1465,18 +1829,19 @@
       ? '<span class="badge rz" title="Play started in the red zone (opponent&rsquo;s 20 or inside)">RZ</span>'
       : '';
     const isNullified = boothEventNullified(e);
-    const nullChip = (isNullified && !e.removesPoints)
-      ? '<span class="badge removed" title="A score was nullified on this play">NULLIFIED</span>'
-      : '';
+    const watchChip = scoringWatchChipHTML(e);
     return '' +
-      '<article class="booth-msg ' + esc(e.kind) + (isNew ? ' new' : '') +
-        (isNullified ? ' pts-removed' : '') + '">' +
+      '<article class="booth-msg ' + esc(e.kind) +
+        (isNullified ? ' pts-removed' : '') +
+        (e.scoringWatch === 'pending' ? ' scoring-pending' : '') +
+        (e.scoringWatch === 'retained' ? ' scoring-retained' : '') +
+        (e.irregularity ? ' scoring-integrity' : '') + '">' +
         '<div class="booth-msg-top">' +
           '<span class="booth-when">' + esc(when) + '</span>' +
           liveTag +
           '<span class="badge ' + esc(e.kind) + '">' + esc(kind) + '</span>' +
           rz +
-          nullChip +
+          watchChip +
           (result ? '<span class="badge result ' + esc(e.result) + '">' + esc(result) + '</span>' : '') +
           '<span class="booth-score">' + score + '</span>' +
         '</div>' +
@@ -1488,88 +1853,7 @@
       '</article>';
   }
 
-  /* ------------------------------- red zone ------------------------------ */
-  /*
-   * The Red Zone tab: booth events (flags, challenges, replay reviews) that
-   * BOTH
-   *   - started in the red zone — the opponent's 20-yard line or inside.
-   *     Membership comes from NFLMap.boothEvent(...).redZone, computed only
-   *     from the verified play position fields (see lib/mapping.js); an
-   *     event whose distance could not be established is never shown, AND
-   *   - nullified a score: a touchdown / field goal / PAT / 2-pt conversion
-   *     reported as NULLIFIED, wiped by a "- No Play" foul, or REVERSED on
-   *     review, or points ESPN actually removed from the running score
-   *     (NFLMap.boothEventNullifies — see lib/mapping.js).
-   */
-
-  function renderRedZone(el) {
-    const events = NFLMap.boothEvents(
-      state.summary && state.summary.drives,
-      liveLastPlay()
-    ).filter(function (e) { return e.redZone && boothEventNullified(e); });
-    const feed = el.querySelector('.booth-feed');
-    const prevScroll = feed ? feed.scrollTop : 0;
-    const nearBottom = !feed ||
-      (feed.scrollHeight - feed.scrollTop - feed.clientHeight < 56);
-
-    el.innerHTML = redZoneHTML(events);
-
-    const feed2 = el.querySelector('.booth-feed');
-    if (feed2) {
-      if (nearBottom) feed2.scrollTop = feed2.scrollHeight;
-      else feed2.scrollTop = prevScroll;
-    }
-  }
-
-  function redZoneHTML(events) {
-    const filter = state.redZoneFilter || 'all';
-    const counts = boothKindCounts(events);
-    const visible = events.filter(function (e) {
-      return boothEventShown(e, filter);
-    });
-
-    const filters = boothFiltersHTML(filter, counts, 'data-redzone-filter', '');
-
-    let topBanner = '';
-    if (events.length) {
-      const removedPts = events.reduce(function (sum, e) {
-        return sum + (e.removesPoints ? Number(e.pointsRemoved) || 0 : 0);
-      }, 0);
-      topBanner = '<div class="booth-banner removed-banner" role="status">' +
-        '<span class="badge removed">' + events.length + ' NULLIFIED IN RZ</span>' +
-        '<span>' + events.length + ' red zone scoring play(s) taken off the board' +
-          (removedPts ? ' – ' + removedPts + ' pts removed' : '') + '.</span>' +
-      '</div>';
-    }
-
-    let body;
-    if (!visible.length) {
-      body = '<div class="empty booth-empty">No nullified red zone scores yet &mdash; ' +
-        'no touchdown, field goal, PAT or 2-pt conversion has been wiped out ' +
-        'from the opponent&rsquo;s 20 or inside.</div>';
-    } else {
-      body = '<div class="booth-feed" role="log" aria-live="polite" aria-relevant="additions">' +
-        visible.map(function (e) { return boothMsgHTML(e, false); }).join('') +
-      '</div>';
-    }
-
-    const live = current() && current().status && current().status.state === 'in';
-    // Literal arrow: foot passes through esc() below.
-    const foot = 'Nullified scores on plays that started in the opponent’s 20 or ' +
-      'inside · TD, FG, PAT & 2-pt wiped by NULLIFIED / No Play / REVERSED wording, ' +
-      'or points removed from the running score' +
-      (live ? ' · updated every ' + LIVE_REVIEW_SECONDS + 's while live' : '');
-
-    return '<div class="booth">' +
-      '<div class="booth-head">' +
-        '<div class="booth-title">Red zone nullified scores</div>' +
-        '<div class="booth-sub">' + esc(foot) + '</div>' +
-      '</div>' +
-      topBanner +
-      '<div class="booth-filters">' + filters + '</div>' +
-      body +
-    '</div>';
-  }
+  /* The red-zone cut is rendered by the dedicated `redzone` ruling category. */
 
   /* ------------------------------- play by play -------------------------- */
 
@@ -1596,12 +1880,12 @@
     });
     // If a score was nullified anywhere in this game, add a top banner to the
     // play-by-play too, so it is obvious without switching to the Flags tab.
-    const nullifiedInGame = boothEvents.filter(boothEventNullified);
+    const nullifiedInGame = uniqueScoringEvents(boothEvents, boothEventNullified);
     let topBanner = '';
     if (nullifiedInGame.length) {
       topBanner = '<div class="booth-banner removed-banner" role="status">' +
         '<span class="badge removed">' + nullifiedInGame.length + ' NULLIFIED</span>' +
-        '<span>' + nullifiedInGame.length + ' scoring play(s) taken off the board in this game – see the highlighted rows, or the Flags &amp; Reviews Nullified filter.</span>' +
+        '<span>' + nullifiedInGame.length + ' scoring play(s) taken off the board in this game – see the highlighted rows or the Nullified tab.</span>' +
       '</div>';
     }
     return '<div class="pbp">' + topBanner + out.join('') + '</div>';
@@ -1769,16 +2053,17 @@
     state.eventIndex = -1;
     state.summary = null;
     state.lastGameContentRenderAt = 0;
-    state.boothFilter = 'all';
-    state.redZoneFilter = 'all';
-    state.seenBoothIds = {};
-    state.boothPrimed = false;
     state.daySummaries = {};
     state.summaryRequests = {};
     state.dayFeed = { items: [], primed: false };
+    state.dayAuditItems = [];
+    state.dayPendingRulings = {};
+    state.dayDisappearanceAuditItems = [];
     state.dayBoothNullified = {};
-    state.dayBoothFilter = 'all';
-    state.alertedBoothKeys = {};
+    state.dayWatchTab = 'nullified';
+    state.alertedScoringKeys = {};
+    state.fastPlaySignatures = {};
+    state.liveHeaderQueued = false;
     $('day-booth').classList.add('hidden');
     $('date-label').textContent = fmtDateLabel(d);
     showScoreboardView();
@@ -1823,25 +2108,24 @@
       if (card) openGame(card.getAttribute('data-id'));
     });
 
-    // The day-wide booth chat: sound toggle + filter buttons + click a message
-    // to open that game's own Flags & Reviews tab (or its Red Zone tab while the
-    // Red zone filter is active — the same cut the user was just browsing).
+    // The day-wide panel exposes a confirmed-nullification stream and a
+    // separate, silent audit view. A row opens its corresponding game tab.
     $('day-booth').addEventListener('click', function (e) {
       if (e.target.closest('.day-sound-btn')) {
         toggleBoothSound();
         return;
       }
-      const filt = e.target.closest('.day-filter');
-      if (filt) {
-        state.dayBoothFilter = filt.getAttribute('data-day-filter');
+      const tab = e.target.closest('.day-watch-tab');
+      if (tab) {
+        state.dayWatchTab = tab.getAttribute('data-day-tab') === 'integrity'
+          ? 'integrity'
+          : 'nullified';
         renderDayBooth();
         return;
       }
       const msg = e.target.closest('.day-msg');
       if (msg) {
-        openGame(msg.getAttribute('data-id'),
-          state.dayBoothFilter === 'redzone' ? 'redzone' : 'booth');
-        return;
+        openGame(msg.getAttribute('data-id'), msg.getAttribute('data-ruling-tab') || 'nullified');
       }
     });
 
@@ -1863,24 +2147,6 @@
       tabs.forEach(function (t) { t.classList.toggle('active', t === btn); });
       renderTabContent();
       state.lastGameContentRenderAt = Date.now();
-    });
-
-    // The Flags & Reviews and Red Zone filter buttons live inside
-    // #game-content, which is rebuilt on every refresh, so they use one
-    // delegated listener on that container.
-    $('game-content').addEventListener('click', function (e) {
-      const btn = e.target.closest('.booth-filter');
-      if (!btn) return;
-      const el = $('game-content');
-      const booth = btn.getAttribute('data-booth-filter');
-      const redzone = btn.getAttribute('data-redzone-filter');
-      if (booth) {
-        state.boothFilter = booth;
-        renderBooth(el);
-      } else if (redzone) {
-        state.redZoneFilter = redzone;
-        renderRedZone(el);
-      }
     });
 
     // Escape returns from the game view to the scoreboard.

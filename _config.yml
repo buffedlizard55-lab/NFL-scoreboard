@@ -1,7 +1,7 @@
 # GitHub Pages (Jekyll) configuration.
 #
-# The scoreboard is a fully static app (vanilla HTML/CSS/JS calling ESPN's
-# public, CORS-enabled API), so Pages can publish it straight from the repo
+# The scoreboard is a fully static app (vanilla HTML/CSS/JS calling observed
+# ESPN Gamecast web endpoints), so Pages can publish it straight from the repo
 # root. Jekyll just needs to skip the development scaffolding.
 exclude:
   - server.js

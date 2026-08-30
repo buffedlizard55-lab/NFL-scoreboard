@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Live NFL scoreboard — every game for any day, with play-by-play, flags & reviews, team stats and player stats.">
+  <meta name="description" content="Live NFL scoreboard with an all-games feed for confirmed nullified scoring plays and separate scoring-ruling views.">
   <meta name="theme-color" content="#0a1631">
   <title>NFL Scoreboard</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
@@ -26,7 +26,7 @@
 
   <main>
     <section id="day-booth" class="hidden"
-      aria-label="Live flags and reviews from every game"></section>
+      aria-label="All-games confirmed nullified scoring-play feed and source data checks"></section>
 
     <section id="scoreboard-view"></section>
 
@@ -42,15 +42,15 @@
 
       <div id="game-header" class="game-header"></div>
 
-      <nav id="tabs" class="tabs"></nav>
+      <nav id="tabs" class="tabs" aria-label="Game details and scoring-ruling categories"></nav>
 
       <div id="game-content" class="game-content"></div>
     </section>
   </main>
 
   <footer class="footer">
-    Clean NFL scoreboard &middot; live data via ESPN&rsquo;s public API &middot; no videos
-    &middot; <span class="muted">not affiliated with the NFL or NFL.com</span>
+    Clean NFL scoreboard &middot; live provider data via ESPN Gamecast endpoints &middot; no videos
+    &middot; <span class="muted">NFL rules/replay criteria are linked in the nullification feed and separate ruling views; this is not an NFL officiating feed and is not affiliated with the NFL or NFL.com.</span>
   </footer>
 
   <script src="lib/mapping.js"></script>

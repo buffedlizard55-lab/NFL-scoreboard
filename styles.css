@@ -187,6 +187,14 @@ main {
 .badge.result.confirmed, .badge.result.stands { background: #e9f6ee; color: var(--win); }
 .badge.result.declined, .badge.result.offsetting { background: #eef1f5; color: var(--ink-2); }
 .badge.removed { background: #fff4d6; color: #92400e; border: 1px solid #fcd34d; }
+/* Scoring-watch states are intentionally distinct from a confirmed removal.
+ * Potential and data-check records stay visually useful without looking like
+ * an alert or a final officiating result. */
+.badge.watch-status { border: 1px solid transparent; }
+.badge.pending-score { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.badge.retained-score { background: #e9f6ee; color: #166534; border-color: #bbf7d0; }
+.badge.integrity { background: #eef1f5; color: #475569; border-color: #cbd5e1; }
+.badge.source-lane { background: #e7eefe; color: #1e40af; border-color: #bfdbfe; font-size: 10px; }
 .badge .st-sub { font-weight: 600; margin-left: 4px; }
 
 /* Game cards with a nullified score get a stronger outline so they pop in
@@ -531,8 +539,8 @@ button:focus-visible {
   .empty-sub br { display: none; }
 }
 
-/* ---------------------- flags & reviews (booth chat) -------------------- */
-/* Day-wide live booth chat (scoreboard view) */
+/* ---------------- scoring-ruling categories and live outcomes ------------ */
+/* The day panel is a confirmed-nullification stream; its audit view is separate. */
 .day-booth {
   margin-bottom: 20px;
 }
@@ -588,6 +596,31 @@ button:focus-visible {
 .booth-head-main { min-width: 0; }
 .booth-title { font-weight: 800; font-size: 15px; }
 .booth-sub { font-size: 12px; color: var(--ink-2); margin-top: 4px; }
+.watch-provenance {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 0 12px 12px;
+  padding: 8px 10px;
+  background: #f6f8fb;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink-2);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.watch-provenance a { color: #1d4ed8; font-weight: 700; }
+.source-tag {
+  flex: none;
+  color: #1e3a8a;
+  background: #e7eefe;
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .35px;
+}
 .day-sound-btn {
   flex: none;
   border: 1px solid var(--line);
@@ -614,6 +647,19 @@ button:focus-visible {
   gap: 6px;
   padding: 0 12px 12px;
   overflow-x: auto;
+}
+/* These are panel selectors, not state filters: Live nullified and Data
+ * checks are intentionally mutually exclusive all-games views. */
+.day-watch-tabs {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+.ruling-category.ruling-integrity .booth-head {
+  background: #f8fafc;
+}
+.ruling-category.ruling-nullified .booth-head,
+.ruling-category.ruling-redzone .booth-head {
+  background: linear-gradient(90deg, #fffbeb, #fff);
 }
 .booth-filter {
   border: 1px solid var(--line);
@@ -675,6 +721,19 @@ button:focus-visible {
 .booth-msg.challenge { border-left-color: #2563eb; }
 .booth-msg.replay { border-left-color: #7c3aed; }
 .booth-msg.review { border-left-color: var(--live); }
+.booth-msg.integrity { border-left-color: #64748b; }
+.booth-msg.scoring-pending {
+  border-left-color: #2563eb;
+  background: linear-gradient(90deg, #f5f9ff, #fff);
+}
+.booth-msg.scoring-retained {
+  border-left-color: #16a34a;
+  background: linear-gradient(90deg, #f2fbf5, #fff);
+}
+.booth-msg.scoring-integrity {
+  border-left-color: #64748b;
+  background: linear-gradient(90deg, #f8fafc, #fff);
+}
 /* A nullified score: the whole message is tinted so it stands out while
  * scanning the live feed. */
 .booth-msg.pts-removed {
@@ -682,11 +741,6 @@ button:focus-visible {
   border-left-width: 6px;
   background: linear-gradient(90deg, #fffbeb, #fffdf5);
   box-shadow: 0 2px 8px rgba(180, 83, 9, .12);
-}
-.booth-msg.new { animation: booth-in .35s ease; }
-@keyframes booth-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: none; }
 }
 .booth-msg-top {
   display: flex;
@@ -745,6 +799,9 @@ button:focus-visible {
   line-height: 1.4;
   color: var(--ink-2);
 }
+.booth-note.pending-note { color: #1d4ed8; font-weight: 700; }
+.booth-note.retained-note { color: #166534; font-weight: 700; }
+.booth-note.integrity-note { color: #475569; font-weight: 700; }
 .day-msg .booth-state { background: #f6f8fb; border-radius: 8px; padding: 6px 8px; }
 
 /* -------------------------------- footer -------------------------------- */
