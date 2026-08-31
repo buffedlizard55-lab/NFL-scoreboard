@@ -644,12 +644,14 @@ button:focus-visible {
 .day-sound-btn.on:hover { filter: brightness(1.08); }
 .booth-filters {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 0 12px 12px;
   overflow-x: auto;
 }
-/* These are panel selectors, not state filters: Live nullified and Data
- * checks are intentionally mutually exclusive all-games views. */
+/* These are panel selectors, not state filters: the all-games Category tabs
+ * are intentionally mutually exclusive all-games views, and only the Live
+ * nullified panel is an outcome stream that may alert. */
 .day-watch-tabs {
   border-bottom: 1px solid var(--line);
   margin-bottom: 12px;

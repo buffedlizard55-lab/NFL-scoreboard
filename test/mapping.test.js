@@ -446,6 +446,24 @@ ok('boothScoreEffect / boothEventContext: null and out-of-range safety', functio
 // Every play string below is real ESPN/NFL play-by-play wording (Super Bowl
 // LIX, event 401671889, and NFL gamebook excerpts) — nothing is invented.
 
+ok('scoreKindFromText: recognizes scoring wording without a provider scoring flag', function () {
+  // The compact header sometimes omits `scoringPlay: true`; text is the only
+  // fast-lane signal, so the recognizer must cover every Rule 11 score kind.
+  assert.strictEqual(NFLMap.scoreKindFromText('J.Banks 4 yard run, TOUCHDOWN.'), 'touchdown');
+  assert.strictEqual(NFLMap.scoreKindFromText('R.Runner tackled in the end zone for a SAFETY.'), 'safety');
+  assert.strictEqual(NFLMap.scoreKindFromText('K.Gay 35 yard field goal is GOOD.'), 'fieldGoal');
+  assert.strictEqual(NFLMap.scoreKindFromText('Extra point is GOOD.'), 'extraPoint');
+  assert.strictEqual(NFLMap.scoreKindFromText('Two-point conversion attempt is good.'), 'twoPoint');
+  // Scoring plays that were NOT converted are not scored attempts at all.
+  assert.strictEqual(NFLMap.scoreKindFromText('K.Gay 52 yard field goal is NO GOOD.'), '');
+  assert.strictEqual(NFLMap.scoreKindFromText('Extra point is NO GOOD.'), '');
+  // A defensive position is not a scoring safety, and a review text is not a
+  // score by itself.
+  assert.strictEqual(NFLMap.scoreKindFromText('D.Hunter playing safety.'), '');
+  assert.strictEqual(NFLMap.scoreKindFromText('Play under review.'), '');
+  assert.strictEqual(NFLMap.scoreKindFromText('PENALTY on LV-K.Miller, False Start, 5 yards - No Play.'), '');
+});
+
 ok('nullifiedScoreText: real "TOUCHDOWN NULLIFIED by Penalty" wording', function () {
   // Verbatim from ESPN's Super Bowl LIX play-by-play (defensive foul).
   assert.strictEqual(NFLMap.nullifiedScoreText(

@@ -26,6 +26,14 @@ or penalty; the live all-games feed publishes only confirmed nullifications.
 - Provides separate single-game tabs for **Flags, Challenges, Replay, Under
   review, Nullified, Red Zone, and Data checks**, plus nullified-score
   highlighting in Play-by-Play.
+- The all-games panel mirrors those categories in its own **separate tabs**
+  (Live nullified, Flags, Challenges, Replay, Under review, Red zone, and
+  Data checks). Only the **Live nullified** tab is an outcome feed and may
+  alert; every other all-games tab is a silent tracking view. A flag,
+  challenge, replay, under-review, or red-zone record can only be promoted to
+  the live panel when it is a confirmed nullification of the exact scoring play
+  that added the points (a direct result, never the end result of a drive or a
+  previous drive).
 - Keeps a potential ruling in its relevant game-level category while its source
   outcome is unresolved, then records a final source-supported result. It never
   turns a possibility into a claimed nullification.
@@ -38,9 +46,9 @@ or penalty; the live all-games feed publishes only confirmed nullifications.
 
 | State | Meaning | Where it appears | Sound / desktop notification |
 | --- | --- | --- | --- |
-| **Potential** | A scoring-linked ruling is pending in the provider feed. | Its relevant game-level category only. | Never. It is visual-only. |
-| **Nullified** | The source gives explicit nullification wording, a contiguous overturned scoring ruling, or a complete, causally tied one-team score rollback. | The live all-games feed and Nullified / Red Zone game tabs. | **Only this state** may alert. |
-| **No rollback** | The source published a final retaining result or moved to a normal next play without a rollback. | Its relevant game-level category only. | Never. |
+| **Potential** | A scoring-linked ruling is pending in the provider feed. | Its relevant game-level category only (and the matching all-games tracking tab). | Never. It is visual-only. |
+| **Nullified** | The source gives explicit nullification wording, a contiguous overturned scoring ruling, or a complete, causally tied one-team score rollback. | The live all-games feed and the Nullified / Red Zone tabs (per-game and all-games). | **Only this state** may alert. |
+| **No rollback** | The source published a final retaining result or moved to a normal next play without a rollback. | Its relevant game-level category only (and the matching all-games tracking tab). | Never. |
 | **Data check** | The provider's score changed without a causal ruling, or a pending record disappeared before a result. The record needs review. | The separate all-games and game-level Data checks views. | Never. |
 
 Notifications are deduplicated by scoring play. Thus a pending record updated
@@ -82,7 +90,7 @@ While selected-day games are live and the page is visible, the app attempts:
 
 | Lane | Nominal schedule | Purpose |
 | --- | ---: | --- |
-| ESPN compact live header | every 250 ms | Fast score/status/last-play detection across the league |
+| ESPN compact live header | every 150 ms | Lowest-latency score/status/last-play detection across the league |
 | Targeted ESPN game detail | immediately after a changed scoring/scoring-ruling header play or score | One-shot full-play-by-play reconciliation for that game; does not wait for the next base cycle |
 | ESPN game detail | every 1 second per live selected-day game | Full play-by-play reconciliation and score-ruling context |
 | Selected-day scoreboard | every 15 seconds | Game list and scheduled/final status refresh |
@@ -90,14 +98,18 @@ While selected-day games are live and the page is visible, the app attempts:
 Requests use `cache: 'no-store'` and a shared in-flight guard prevents
 overlapping requests in each lane. A changed header can therefore start one
 scoring-relevant game's detail request immediately; once that game has cached
-play context, ordinary unrelated flags stay on the base cadence. If a compact-
-header reply outlasts its 250 ms interval, one missed tick is queued and starts
-immediately after that successful reply, rather than waiting for another
-interval boundary. These attempted intervals are not a freshness or end-to-end
-latency guarantee: upstream publication, network delay/failure, rate limits,
-browser scheduling/background tabs, caching outside this app, and autoplay
-policy are outside the app's control. A browser may also suppress sound until a
-user has interacted with the page.
+play context, ordinary unrelated flags stay on the base cadence. A scoring play
+is recognized not only from the provider's `scoringPlay` flag but also from its
+own play text (touchdown / field goal / safety / try), so a header play that
+omits the flag still triggers targeted reconciliation instead of waiting a
+second for the full play-by-play. If a compact-header reply outlasts its
+150 ms interval, one missed tick is queued and starts immediately after that
+successful reply, rather than waiting for another interval boundary. These
+attempted intervals are not a freshness or end-to-end latency guarantee:
+upstream publication, network delay/failure, rate limits, browser
+scheduling/background tabs, caching outside this app, and autoplay policy are
+outside the app's control. A browser may also suppress sound until a user has
+interacted with the page.
 
 ## Quick start
 
@@ -153,8 +165,10 @@ states; accepted and rejected causal paths; score types including defensive and
 special-teams touchdowns, field goals, PATs, two-point tries, and safeties;
 partial/malformed score safety; all-games merging; fast-header refreshes;
 pending-to-nullified behavior; disappearance/audit behavior; separate category
-views; and the strict rule that only a confirmed nullified score can enter the
-all-games feed or trigger the sound/desktop-notification paths.
+views; the separate all-games tracking tabs for flags, challenges, replay,
+under-review and red zone; and the strict rule that only a confirmed nullified
+score can enter the all-games live feed or trigger the
+sound/desktop-notification paths.
 
 ## GitHub Pages
 

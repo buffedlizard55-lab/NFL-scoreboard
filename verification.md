@@ -63,10 +63,18 @@ The mapper intentionally separates source evidence from an inferred ruling:
 
 | Watch state | Required evidence | Display location | Notification behavior |
 | --- | --- | --- | --- |
-| **Potential** | A penalty/review/challenge is causally contiguous with a score, but no final removal evidence is published | Its separate scoring-linked game category (Flags, Challenges, Replay, or Under review), never the all-games outcome feed | Visual only; never sound or desktop notification. |
-| **Nullified** | Explicit score-nullification wording; a contiguous overturned scoring ruling; or a complete, causally tied one-team running-score rollback | The all-games **Live nullified** feed and the Nullified / Red Zone game tabs | The only state eligible for visual alert emphasis, sound, and an already-granted desktop notification. |
-| **No rollback** | A final non-nullified result, or the source moves to a normal next play without a rollback | Its separate scoring-linked game category only | Visual audit record only. |
+| **Potential** | A penalty/review/challenge is causally contiguous with a score, but no final removal evidence is published | Its separate scoring-linked game category (Flags, Challenges, Replay, or Under review) and the matching all-games tracking tab, never the all-games outcome feed | Visual only; never sound or desktop notification. |
+| **Nullified** | Explicit score-nullification wording; a contiguous overturned scoring ruling; or a complete, causally tied one-team running-score rollback | The all-games **Live nullified** feed and the Nullified / Red Zone tabs (per-game and all-games) | The only state eligible for visual alert emphasis, sound, and an already-granted desktop notification. |
+| **No rollback** | A final non-nullified result, or the source moves to a normal next play without a rollback | Its separate scoring-linked game category only and the matching all-games tracking tab | Visual audit record only. |
 | **Data check** | A complete provider running score falls without a causal scoring ruling, or a pending source record disappears before an outcome | Separate all-games and game-level Data checks views | Visual audit record only; the app does not guess a nullification. |
+
+The all-games panel renders these categories in **separate tabs** (Live
+nullified, Flags, Challenges, Replay, Under review, Red zone, Data checks).
+The **Live nullified** tab is the single outcome stream that may alert; the
+remaining tabs are silent tracking views. A category record advances into the
+Live nullified tab only when the source evidences a confirmed nullification of
+the exact scoring play that originally added the points — a direct result of
+that play, never the end result of a drive or of an earlier drive.
 
 The all-games outcome path applies the mapper's strict
 `isConfirmedNullifiedScoringEvent` gate: it requires a scoring-linked event
@@ -90,16 +98,21 @@ than assigned to either team.
   [api.nfl.com/docs/identity/register](https://api.nfl.com/docs/identity/register/index.html)
   describes OAuth client-credential access. This repository has no such
   credential or demonstrated browser-facing NFL live-data contract.
-- The app schedules the compact header request every 250 ms while selected-day
+- The app schedules the compact header request every 150 ms while selected-day
   games are live, game-detail reconciliation every second, and a selected-day
   scoreboard refresh every 15 seconds. When a changed header play is provider-
   classified as a scoring play or a scoring-linked ruling—or the header score
   changes without a usable last play—it also starts one targeted detail
-  reconciliation immediately rather than waiting for that base second. Shared
-  in-flight guards prevent duplicate detail calls; if a header
-  reply spans one 250 ms tick, the client keeps just one queued follow-up and
-  starts it after the successful reply clears. These are attempted client
-  schedules, not an upstream publication or end-to-end latency guarantee.
+  reconciliation immediately rather than waiting for that base second. A
+  scoring play is recognized from the provider's `scoringPlay` flag and, as a
+  fallback, from the play's own text (`scoreKindFromText`: touchdown, field
+  goal, safety, extra point, two-point try). That removes the up-to-one-second
+  wait for the full play-by-play on the common case where the compact header
+  publishes a scoring play without the flag. Shared in-flight guards prevent
+  duplicate detail calls; if a header reply spans one 150 ms tick, the client
+  keeps just one queued follow-up and starts it after the successful reply
+  clears. These are attempted client schedules, not an upstream publication or
+  end-to-end latency guarantee.
 - Provider publication timing, request duration/failure, browser scheduling
   (especially background tabs), rate limits, caching outside the app, and
   autoplay policy can delay or suppress an update or sound. The app requests
@@ -117,5 +130,15 @@ covers all-games collection; immediate targeted detail after a changed scoring
 or scoring-ruling header record (including a score update without `lastPlay`);
 a single non-overlapping catch-up header poll after a slow reply;
 pending-to-nullified and pending-disappearance updates; focused category
-rendering; and the strict rule that only a confirmed nullified scoring play can
-enter the all-games live feed or emit sound/desktop-notification alerts.
+rendering; the separate all-games tracking tabs for flags, challenges, replay,
+under-review and red zone; and the strict rule that only a confirmed nullified
+scoring play can enter the all-games live feed or emit
+sound/desktop-notification alerts.
+
+> **Verification status (2026-08-30).** Live endpoint re-verification was
+> performed for ESPN event `401873286` with a network-connected client when this
+> field/evidence inventory was first assembled; the checked payload shape is
+> preserved in `test/fixtures/sample.json` so the mapping and app tests run
+> offline. When running in an environment with no outbound network, the live
+> provider calls cannot be re-fetched; the fixture and the static tests remain
+> the verification baseline in that case.
