@@ -437,8 +437,8 @@ async function run() {
     });
   }
 
-  assert.deepStrictEqual(timers.map(function (timer) { return timer.ms; }), [15000, 250, 1000]);
-  const liveScoreTimer = timers.find(function (timer) { return timer.ms === 250; });
+  assert.deepStrictEqual(timers.map(function (timer) { return timer.ms; }), [15000, 150, 1000]);
+  const liveScoreTimer = timers.find(function (timer) { return timer.ms === 150; });
   const reviewTimer = timers.find(function (timer) { return timer.ms === 1000; });
   assert.ok(liveScoreTimer && reviewTimer);
   assert.strictEqual(fetches.filter(function (url) {
@@ -454,7 +454,7 @@ async function run() {
   assert.ok(initialWatch.indexOf('Confirmed nullified scoring plays') !== -1);
   assert.ok(initialWatch.indexOf('LIVE PROVIDER: ESPN GAMECAST') !== -1);
   assert.ok(initialWatch.indexOf('Field verification &amp; limits') !== -1);
-  assert.ok(initialWatch.indexOf('fast last-play header 0.25s attempted') !== -1);
+  assert.ok(initialWatch.indexOf('fast last-play header 0.15s attempted') !== -1);
   assert.ok(initialWatch.indexOf('TOUCHDOWN NULLIFIED by Penalty') !== -1);
   assert.ok(initialWatch.indexOf('data-day-tab="nullified"') !== -1);
   assert.ok(initialWatch.indexOf('data-day-tab="integrity"') !== -1);
@@ -473,6 +473,62 @@ async function run() {
   assert.ok(elements['scoreboard-view'].innerHTML.indexOf('>NULLIFIED<') !== -1);
   assert.strictEqual(notifications.length, 0,
     'initial history and a pending source record never generate desktop notifications');
+
+  // The all-games panel tracks every scoring-ruling category in its own tab.
+  ['flags', 'challenges', 'replay', 'review', 'redzone', 'nullified', 'integrity']
+    .forEach(function (id) {
+      assert.ok(initialWatch.indexOf('data-day-tab="' + id + '"') !== -1,
+        'all-games tab ' + id + ' is present');
+    });
+
+  // Each dedicated all-games category surfaces its scoring-linked records,
+  // while the default live feed and the alert path stay nullified-only.
+  clickDayTab('flags');
+  let dayCategory = elements['day-booth'].innerHTML;
+  assert.ok(dayCategory.indexOf('Scoring-linked flags · all games') !== -1);
+  assert.ok(dayCategory.indexOf('TOUCHDOWN NULLIFIED by Penalty') !== -1);
+  assert.ok(dayCategory.indexOf('>NULLIFIED<') !== -1,
+    'a nullified flag is a confirmed outcome in the all-games flags panel');
+  assert.strictEqual(dayCategory.indexOf('>POTENTIAL<'), -1,
+    'a nullified flag is not left pending in its all-games category');
+
+  clickDayTab('challenges');
+  dayCategory = elements['day-booth'].innerHTML;
+  assert.ok(dayCategory.indexOf('Scoring-linked challenges · all games') !== -1);
+  assert.ok(dayCategory.indexOf('No scoring-linked challenges') !== -1,
+    'an unrelated challenge is not promoted into the all-games scoring feed');
+
+  clickDayTab('replay');
+  dayCategory = elements['day-booth'].innerHTML;
+  assert.ok(dayCategory.indexOf('Scoring-linked replay · all games') !== -1);
+  assert.ok(dayCategory.indexOf('No scoring-linked replay') !== -1,
+    'an unrelated replay is not promoted into the all-games scoring feed');
+
+  clickDayTab('review');
+  dayCategory = elements['day-booth'].innerHTML;
+  assert.ok(dayCategory.indexOf('Scoring plays under review · all games') !== -1);
+  assert.ok(dayCategory.indexOf('Play under review.') !== -1);
+  assert.ok(dayCategory.indexOf('>POTENTIAL<') !== -1,
+    'a pending scoring review is tracked in the all-games under-review panel');
+  assert.strictEqual(dayCategory.indexOf('>NULLIFIED<'), -1,
+    'a pending review is not presented as a confirmed outcome');
+  assert.strictEqual(audio.oscillatorCount, 0,
+    'tracking a pending review in the all-games panel plays no sound');
+
+  clickDayTab('redzone');
+  dayCategory = elements['day-booth'].innerHTML;
+  assert.ok(dayCategory.indexOf('Red zone nullified scores · all games') !== -1);
+  assert.ok(dayCategory.indexOf('enforced at HST 14') !== -1);
+  assert.strictEqual(dayCategory.indexOf('enforced at HST 3'), -1,
+    'the all-games red-zone panel keeps only red-zone nullifications');
+  assert.strictEqual(dayCategory.indexOf('>POTENTIAL<'), -1);
+
+  clickDayTab('nullified');
+  dayCategory = elements['day-booth'].innerHTML;
+  assert.ok(dayCategory.indexOf('Confirmed nullified scoring plays · all games') !== -1);
+  assert.strictEqual(dayCategory.indexOf('>POTENTIAL<'), -1);
+  assert.strictEqual(dayCategory.indexOf('Play under review.'), -1);
+  assert.strictEqual(notifications.length, 0);
 
   // A changed header scoring-review candidate starts that game's full detail
   // reconciliation immediately; it does not wait for the one-second review
@@ -534,6 +590,30 @@ async function run() {
     return url.indexOf('/summary') !== -1;
   }).length, summariesBeforeFastScore + 1,
   'a provider scoring play (including a safety) also triggers immediate reconciliation');
+
+  // The provider's compact header does not always set `scoringPlay: true` for a
+  // touchdown / field goal / safety. A scoring play recognized from its own
+  // text must still start targeted reconciliation so the linking penalty/
+  // review context arrives one round trip sooner rather than on the next full
+  // one-second detail cycle.
+  const summariesBeforeFastText = fetches.filter(function (url) {
+    return url.indexOf('/summary') !== -1;
+  }).length;
+  competition.situation = {
+    lastPlay: {
+      id: 'fast-text-scoring-td', sequenceNumber: '9400000',
+      text: 'J.Banks 4 yard run, TOUCHDOWN.', type: { text: 'Rush' },
+      awayScore: 0, homeScore: 14,
+      period: { number: 2 }, clock: { displayValue: '9:38' }
+      // Deliberately no `scoringPlay` flag; text is the only signal.
+    }
+  };
+  liveScoreTimer.callback();
+  await settle();
+  assert.strictEqual(fetches.filter(function (url) {
+    return url.indexOf('/summary') !== -1;
+  }).length, summariesBeforeFastText + 1,
+  'a header scoring play without an explicit scoring flag still triggers reconciliation from its text');
 
   // Score movement is also reconciled when a compact update temporarily lacks
   // a usable last-play object.
@@ -623,7 +703,7 @@ async function run() {
   liveScoreTimer.callback();
   await settle();
   assert.ok(elements['game-content'].innerHTML.indexOf('>POTENTIAL<') !== -1,
-    'the 250ms header keeps potential tracking current in its category');
+    'the fast header keeps potential tracking current in its category');
   assert.strictEqual(elements['day-booth'].innerHTML.indexOf('>POTENTIAL<'), -1,
     'the all-games feed never exposes an unresolved potential');
   assert.strictEqual(notifications.length, 0);
@@ -794,7 +874,24 @@ async function run() {
   assert.strictEqual(twoGameDay.indexOf('>NO ROLLBACK<'), -1);
   assert.strictEqual(twoGameDay.indexOf('>DATA CHECK<'), -1);
 
-  // If a compact header reply takes longer than its 250 ms interval, retain
+  // The cross-game all-games category tabs still merge by category and stay
+  // summary-only: both games' confirmed nullified flags appear, and the
+  // red-zone tab keeps only the red-zone nullification from each game.
+  clickDayTab('flags');
+  let dayTwo = elements['day-booth'].innerHTML;
+  assert.ok(dayTwo.indexOf('enforced at HST 14') !== -1);
+  assert.ok(dayTwo.indexOf('enforced at LAC 9') !== -1);
+  assert.strictEqual(dayTwo.indexOf('>POTENTIAL<'), -1);
+
+  clickDayTab('redzone');
+  dayTwo = elements['day-booth'].innerHTML;
+  assert.ok(dayTwo.indexOf('enforced at HST 14') !== -1);
+  assert.ok(dayTwo.indexOf('enforced at LAC 9') !== -1);
+  assert.strictEqual(dayTwo.indexOf('enforced at SF 47'), -1,
+    'a midfield flag is not promoted into a red-zone panel');
+  clickDayTab('nullified');
+
+  // If a compact header reply takes longer than its fast interval, retain
   // one missed tick and launch it as soon as the response clears. This avoids
   // idle scheduler time without allowing concurrent header fetches.
   const headersBeforeSlowReply = fetches.filter(function (url) {
@@ -839,6 +936,8 @@ async function run() {
 
   console.log('NFL scoreboard app smoke test');
   console.log('  ✓ all-games live feed contains confirmed scoring nullifications only');
+  console.log('  ✓ all-games panel tracks flags, challenges, replay, under-review, red-zone, nullified and data checks in separate tabs');
+  console.log('  ✓ every all-games tracking tab is silent; only the live nullified panel may alert');
   console.log('  ✓ flags, challenges, replay, under-review, nullified, red-zone, and data checks have separate scoring-linked views');
   console.log('  ✓ changed score and scoring-ruling header records trigger immediate targeted detail reconciliation');
   console.log('  ✓ a slow compact-header reply queues one non-overlapping follow-up poll');

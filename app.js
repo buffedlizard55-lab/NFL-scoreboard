@@ -36,10 +36,24 @@
   ];
 
   const RULING_TABS = ['flags', 'challenges', 'replay', 'review', 'nullified', 'redzone', 'integrity'];
+  /* The all-games panel tracks the same scoring-ruling categories as the
+   * per-game tabs, each in its own panel. The default/nullified panel is the
+   * live outcome stream (confirmed nullifications only); every other panel is
+   * a silent tracking view. Only the nullified panel can alert. */
   const DAY_WATCH_TABS = [
     ['nullified', 'Live nullified'],
+    ['flags', 'Flags'],
+    ['challenges', 'Challenges'],
+    ['replay', 'Replay'],
+    ['review', 'Under review'],
+    ['redzone', 'Red zone'],
     ['integrity', 'Data checks']
   ];
+  const DAY_WATCH_TAB_IDS = DAY_WATCH_TABS.map(function (pair) { return pair[0]; });
+
+  function dayWatchTabSafe(tab) {
+    return DAY_WATCH_TAB_IDS.indexOf(tab) >= 0 ? tab : 'nullified';
+  }
 
   const BOOTH_KIND_LABEL = {
     penalty: 'Flag',
@@ -170,13 +184,14 @@
     daySummaries: {},      // eventId -> { drives, situation, final }
     summaryRequests: {},   // eventId -> { promise, final } for an in-flight fetch
     liveHeaderRequest: null, // one in-flight league-wide live-score request
-    liveHeaderQueued: false, // one missed 250ms tick to run after a slow header reply
+    liveHeaderQueued: false, // one missed fast-header tick to run after a slow reply
     dayFeed: { items: [], primed: false }, // confirmed nullified scores only
     dayAuditItems: [],     // current source irregularities; separate from live feed
+    dayCategoryFeeds: {},  // dayWatchTab id -> merged items across all games
     dayPendingRulings: {}, // prior pending source rows, for disappearance audits
     dayDisappearanceAuditItems: [], // current pending rows lost by the source
     dayBoothNullified: {}, // eventId -> newest scoring nullification, for card badges
-    dayWatchTab: 'nullified', // selected all-games panel: nullified or audit
+    dayWatchTab: 'nullified', // selected all-games panel
     alertedScoringKeys: {}, // scoring-play identities already announced
     fastPlaySignatures: {}, // eventId -> last fast-header play fingerprint
     audioContext: null,     // created only after a user gesture (browser policy)
@@ -712,8 +727,15 @@
     if (!play) return false;
     // NFL replay officials confirm every scoring play and try attempt. A
     // provider scoring flag is therefore worth reconciling immediately even
-    // before a review/penalty line is published.
-    if (play.scoringPlay === true) return true;
+    // before a review/penalty line is published. The provider's compact header
+    // does not always set `scoringPlay: true` for a touchdown / field goal /
+    // safety, so also accept a scoring play identified from the provider's own
+    // play text. This keeps the fast lane from waiting a full second for the
+    // play-by-play that links a following flag/review to the score.
+    if (play.scoringPlay === true ||
+        !!NFLMap.scoreKindFromText(play.text || play.shortText || '')) {
+      return true;
+    }
     if (!NFLMap.classifyBooth(play)) return false;
 
     const cached = ev.id != null ? state.daySummaries[ev.id] : null;
@@ -735,8 +757,8 @@
     if (!state.events.some(function (ev) { return ev.status && ev.status.state === 'in'; })) return;
     // A timer tick never starts a second league-wide request while the prior
     // one is still on the wire. Remember one missed tick so a slow response
-    // can be followed immediately rather than idling until the next interval
-    // boundary; requests still never overlap.
+    // can be followed immediately rather than idling until the next fast-lane
+    // interval boundary; requests still never overlap.
     if (state.liveHeaderRequest) {
       state.liveHeaderQueued = true;
       return;
@@ -775,8 +797,8 @@
           if (!competition) return;
           hydrateEventFromSummary(ev, { header: { competitions: [competition] } });
           const scoreChanged = priorScore !== eventScoreSignature(ev);
-          // The 250 ms header is the fast lane for a new scoring review or
-          // penalty. It updates the all-games scoring watch immediately; a
+          // The fast header is the low-latency lane for a new scoring review
+          // or penalty. It updates the all-games scoring watch immediately; a
           // scoring-relevant change (or a score change with no usable last
           // play) also starts targeted reconciliation now.
           const playChanged = recordFastHeaderPlay(ev);
@@ -815,9 +837,9 @@
         state.liveHeaderRequest = null;
         const runQueuedPoll = state.liveHeaderQueued;
         state.liveHeaderQueued = false;
-        // When a request lasted beyond a 250 ms tick, begin the one queued
-        // poll as soon as this successful reply has cleared. Do not schedule a
-        // hidden-tab retry or turn a failure into a tight retry loop.
+        // When a request lasted beyond a fast-header tick, begin the one
+        // queued poll as soon as this successful reply has cleared. Do not
+        // schedule a hidden-tab retry or turn a failure into a tight retry loop.
         if (runQueuedPoll && headerSucceeded && document.visibilityState !== 'hidden') {
           refreshLiveScores();
         }
@@ -1085,7 +1107,7 @@
     return dayBoothGames().map(function (ev) {
       const cached = state.daySummaries[ev.id] || null;
       const cachedPlay = cached && cached.situation && cached.situation.lastPlay;
-      // The 250 ms header can be newer than the cached full summary.
+      // The fast header can be newer than the cached full summary.
       const lastPlay = (ev.situation && ev.situation.lastPlay) || cachedPlay || null;
       const sourceEvents = NFLMap.scoringWatchEvents(cached && cached.drives, lastPlay)
         .map(function (event) {
@@ -1102,6 +1124,26 @@
       const audit = sourceEvents.filter(function (event) {
         return !!(event && (event.irregularity || event.scoringWatch === 'irregular' ||
           event.kind === 'integrity'));
+      });
+      // Each dedicated all-games tab carries the same scoring-linked records
+      // its per-game counterpart shows. They are all causally tied to a
+      // scoring play (the mapper's scoringWatchEvents gate); the only
+      // difference is the category. The default nullified panel stays the
+      // single outcome stream that may alert.
+      const flagsEvents = sourceEvents.filter(function (event) {
+        return !!(event && event.kind === 'penalty');
+      });
+      const challengeEvents = sourceEvents.filter(function (event) {
+        return !!(event && event.kind === 'challenge');
+      });
+      const replayEvents = sourceEvents.filter(function (event) {
+        return !!(event && event.kind === 'replay');
+      });
+      const reviewEvents = sourceEvents.filter(function (event) {
+        return !!(event && event.kind === 'review');
+      });
+      const redzoneEvents = uniqueScoringEvents(sourceEvents, function (event) {
+        return !!(event && event.redZone && confirmedNullifiedScoringEvent(event));
       });
       const latestNullified = nullified.length ? nullified[nullified.length - 1] : null;
       // Card badges remain outcome-only: a potential or audit record cannot
@@ -1126,7 +1168,12 @@
           return !!(event && event.scoringWatch === 'pending');
         }),
         nullified: nullified,
-        audit: audit
+        audit: audit,
+        flags: flagsEvents,
+        challenges: challengeEvents,
+        replay: replayEvents,
+        review: reviewEvents,
+        redzone: redzoneEvents
       };
     });
   }
@@ -1216,6 +1263,11 @@
     const freshAll = asDayFeed(games, 'events');
     const freshPending = asDayFeed(games, 'pending');
     const freshNullified = asDayFeed(games, 'nullified');
+    const freshFlags = asDayFeed(games, 'flags');
+    const freshChallenges = asDayFeed(games, 'challenges');
+    const freshReplay = asDayFeed(games, 'replay');
+    const freshReview = asDayFeed(games, 'review');
+    const freshRedZone = asDayFeed(games, 'redzone');
     const sourceAudit = asDayFeed(games, 'audit');
     const disappearedAudit = pendingDisappearanceAudits(state.dayPendingRulings, freshAll);
     const activeDisappearances = activeDisappearanceAudits(
@@ -1239,6 +1291,15 @@
     // that just disappeared without an equivalent result. They remain silent
     // and never enter the confirmed-nullification stream.
     state.dayAuditItems = freshAudit;
+    state.dayCategoryFeeds = {
+      nullified: freshNullified,
+      flags: freshFlags,
+      challenges: freshChallenges,
+      replay: freshReplay,
+      review: freshReview,
+      redzone: freshRedZone,
+      integrity: freshAudit
+    };
 
     const feed = el.querySelector('.day-feed');
     const prevScroll = feed ? feed.scrollTop : 0;
@@ -1262,70 +1323,127 @@
     return live;
   }
 
-  function dayWatchTabsHTML(tab, nullifiedCount, auditCount) {
-    const counts = { nullified: nullifiedCount, integrity: auditCount };
+  function dayWatchTabsHTML(tab, counts) {
     return DAY_WATCH_TABS.map(function (pair) {
       const id = pair[0];
-      const count = counts[id] || 0;
+      const count = (counts && counts[id]) || 0;
       return '<button type="button" class="booth-filter day-watch-tab' +
         (tab === id ? ' active' : '') + '" data-day-tab="' + id + '">' +
         esc(pair[1]) + ' · ' + count + '</button>';
     }).join('');
   }
 
+  function dayWatchBoothInfo(tab, scanned, scannable, baseFoot) {
+    switch (tab) {
+      case 'flags':
+        return {
+          title: 'Scoring-linked flags · all games',
+          foot: 'Penalty records causally tied by the provider to a scoring play · alerts fire only on a confirmed nullification · ' + baseFoot,
+          empty: 'No scoring-linked penalties are being tracked across today&rsquo;s games.'
+        };
+      case 'challenges':
+        return {
+          title: 'Scoring-linked challenges · all games',
+          foot: 'Coach challenge records causally tied by the provider to a scoring play · alerts fire only on a confirmed nullification · ' + baseFoot,
+          empty: 'No scoring-linked challenges are being tracked across today&rsquo;s games.'
+        };
+      case 'replay':
+        return {
+          title: 'Scoring-linked replay · all games',
+          foot: 'Replay verdict records causally tied by the provider to a scoring play · alerts fire only on a confirmed nullification · ' + baseFoot,
+          empty: 'No scoring-linked replay rulings are being tracked across today&rsquo;s games.'
+        };
+      case 'review':
+        return {
+          title: 'Scoring plays under review · all games',
+          foot: 'Active or published under-review records causally tied by the provider to a scoring play · alerts fire only on a confirmed nullification · ' + baseFoot,
+          empty: 'No scoring-linked under-review records are being tracked across today&rsquo;s games.'
+        };
+      case 'redzone':
+        return {
+          title: 'Red zone nullified scores · all games',
+          foot: 'Confirmed nullifications on downs that started at the opponent&rsquo;s 20 or inside · ' + baseFoot,
+          empty: 'No confirmed nullified red-zone scores across today&rsquo;s games.'
+        };
+      case 'integrity':
+        return {
+          title: 'Source data checks · all games',
+          foot: 'Current provider score irregularities and unresolved disappeared pending records · alerts are suppressed · ' + baseFoot,
+          empty: 'No current provider score irregularities need review across today&rsquo;s games.'
+        };
+      default:
+        return {
+          title: 'Confirmed nullified scoring plays · all games',
+          foot: 'Only confirmed, scoring-linked nullifications appear here · potential and retained rulings remain in their separate tabs · ' + baseFoot,
+          empty: (scanned < scannable)
+            ? 'Scanning today&rsquo;s games for confirmed nullified scoring plays&hellip;'
+            : 'No confirmed nullified scoring plays today &mdash; no touchdown, field goal, try, or safety has been taken off the board.'
+        };
+    }
+  }
+
   function dayBoothHTML() {
-    const tab = state.dayWatchTab === 'integrity' ? 'integrity' : 'nullified';
-    const nullifiedItems = state.dayFeed.items || [];
-    const auditItems = state.dayAuditItems || [];
-    const items = tab === 'integrity' ? auditItems : nullifiedItems;
+    const tab = dayWatchTabSafe(state.dayWatchTab);
+    const feeds = state.dayCategoryFeeds || {};
+    const nullifiedItems = feeds.nullified || state.dayFeed.items || [];
+    const auditItems = feeds.integrity || state.dayAuditItems || [];
+    const items = feeds[tab] || [];
     const liveNow = liveGamesNow();
     const scannable = state.events.filter(dayBoothScannable).length;
     const scanned = Object.keys(state.daySummaries).length;
     const liveCount = state.events.filter(function (e) {
       return e.status && e.status.state === 'in';
     }).length;
-    const tabs = dayWatchTabsHTML(tab,
-      uniqueScoringEvents(nullifiedItems, confirmedNullifiedScoringEvent).length,
-      auditItems.length);
+    // Count distinct scoring plays, not every row in a review sequence.
+    const counts = {};
+    DAY_WATCH_TABS.forEach(function (pair) {
+      const id = pair[0];
+      const feed = feeds[id] || [];
+      counts[id] = id === 'nullified'
+        ? uniqueScoringEvents(feed, confirmedNullifiedScoringEvent).length
+        : feed.length;
+    });
+    const tabs = dayWatchTabsHTML(tab, counts);
     const baseFoot =
       'TD (offense / defense / special teams), FG, PAT, 2-point and safety · fast last-play header ' +
       LIVE_SCORE_SECONDS + 's attempted · full play-by-play ' + LIVE_REVIEW_SECONDS + 's' +
       (scannable ? ' · games scanned ' + scanned + ' of ' + scannable : '') +
       (liveCount ? ' · ' + liveCount + ' game' + (liveCount === 1 ? '' : 's') + ' live' : '');
-    const title = tab === 'integrity'
-      ? 'Source data checks · all games'
-      : 'Confirmed nullified scoring plays · all games';
-    const foot = tab === 'integrity'
-      ? 'Current provider score irregularities and unresolved disappeared pending records · alerts are suppressed · ' + baseFoot
-      : 'Only confirmed, scoring-linked nullifications appear here · potential and retained rulings remain in their separate game tabs · ' + baseFoot;
+    const info = dayWatchBoothInfo(tab, scanned, scannable, baseFoot);
+    const title = info.title;
+    const foot = info.foot;
 
-    // Count distinct scoring plays, not every row in a review sequence.
-    const nullifiedAll = uniqueScoringEvents(nullifiedItems, confirmedNullifiedScoringEvent);
     let topBanner = '';
-    if (tab === 'nullified' && nullifiedAll.length) {
-      const summary = nullifiedAll.slice(0, 3).map(function (e) {
-        const pts = e.removesPoints ? ' ' + e.pointsRemoved + 'pts' : '';
-        return esc(e.shortName + ':' + pts);
-      }).join(', ');
-      const more = nullifiedAll.length > 3 ? ' +' + (nullifiedAll.length - 3) + ' more' : '';
-      topBanner = '<div class="booth-banner removed-banner day-removed-banner" role="status">' +
-        '<span class="badge removed">' + nullifiedAll.length + ' NULLIFIED</span>' +
-        '<span>Provider-published nullification evidence: ' + summary + more + '.</span>' +
-      '</div>';
+    if (tab === 'nullified') {
+      const nullifiedAll = uniqueScoringEvents(nullifiedItems, confirmedNullifiedScoringEvent);
+      if (nullifiedAll.length) {
+        const summary = nullifiedAll.slice(0, 3).map(function (e) {
+          const pts = e.removesPoints ? ' ' + e.pointsRemoved + 'pts' : '';
+          return esc(e.shortName + ':' + pts);
+        }).join(', ');
+        const more = nullifiedAll.length > 3 ? ' +' + (nullifiedAll.length - 3) + ' more' : '';
+        topBanner = '<div class="booth-banner removed-banner day-removed-banner" role="status">' +
+          '<span class="badge removed">' + nullifiedAll.length + ' NULLIFIED</span>' +
+          '<span>Provider-published nullification evidence: ' + summary + more + '.</span>' +
+        '</div>';
+      }
+    } else if (tab === 'redzone') {
+      const rzCount = counts.redzone || 0;
+      if (rzCount) {
+        topBanner = '<div class="booth-banner removed-banner day-removed-banner" role="status">' +
+          '<span class="badge removed">' + rzCount + ' NULLIFIED IN RZ</span>' +
+          '<span>' + rzCount + ' red zone scoring play(s) taken off the board across today&rsquo;s games.</span>' +
+        '</div>';
+      }
     }
 
     let body;
     if (!items.length) {
-      const empty = tab === 'integrity'
-        ? 'No current provider score irregularities need review.'
-        : (scanned < scannable
-          ? 'Scanning today&rsquo;s games for confirmed nullified scoring plays&hellip;'
-          : 'No confirmed nullified scoring plays today &mdash; no touchdown, field goal, try, or safety has been taken off the board.');
-      body = '<div class="empty booth-empty">' + empty + '</div>';
+      body = '<div class="empty booth-empty">' + info.empty + '</div>';
     } else {
       body = '<div class="day-feed" role="log" aria-live="off">' +
         items.map(function (e) {
-          return dayBoothMsgHTML(e, !!liveNow[e.gameId]);
+          return dayBoothMsgHTML(e, !!liveNow[e.gameId], tab);
         }).join('') +
       '</div>';
     }
@@ -1451,7 +1569,7 @@
     return '<span class="badge source-lane" title="Detected on the fast live-header lane; full play-by-play will reconcile it.">FAST</span>';
   }
 
-  function dayBoothMsgHTML(e, liveNow) {
+  function dayBoothMsgHTML(e, liveNow, contextTab) {
     const q = NFLMap.quarterLabel(e.quarter);
     const when = [q, e.clock].filter(Boolean).join(' · ');
     const kind = BOOTH_KIND_LABEL[e.kind] || e.kind;
@@ -1481,12 +1599,20 @@
     const watchChip = scoringWatchChipHTML(e);
     const sourceLane = sourceLaneChipHTML(e);
     const state = boothScoreTrailHTML(e, e.awayAbbr, e.homeAbbr);
-    // The all-games feed links directly to a focused category. A red-zone
-    // nullification preserves its red-zone route; source audit rows never
-    // masquerade as an outcome.
-    const targetTab = e.irregularity || e.scoringWatch === 'irregular' || e.kind === 'integrity'
-      ? 'integrity'
-      : (isNullified && e.redZone ? 'redzone' : 'nullified');
+    // The all-games feed links directly to a focused category. A row shown in
+    // a dedicated tracking tab (flags / challenges / replay / review / red
+    // zone / data checks) opens that same game tab; the default outcome panel
+    // routes a red-zone nullification to the red-zone view and everything else
+    // to the nullified view. Source audit rows never masquerade as an outcome.
+    let targetTab;
+    if (contextTab && ['flags', 'challenges', 'replay', 'review', 'redzone', 'integrity']
+      .indexOf(contextTab) >= 0) {
+      targetTab = contextTab;
+    } else {
+      targetTab = e.irregularity || e.scoringWatch === 'irregular' || e.kind === 'integrity'
+        ? 'integrity'
+        : (isNullified && e.redZone ? 'redzone' : 'nullified');
+    }
     const aria = esc(e.shortName) + ', ' + esc(kind) + ': ' + esc(e.text) +
       (e.removesPoints ? ', removed ' + esc(e.pointsRemoved) + ' points' : '') +
       (isNullified && !e.removesPoints ? ', score nullified' : '') +
@@ -1651,7 +1777,7 @@
   }
 
   function liveLastPlay() {
-    // The current event receives the 250 ms header updates. Prefer it over the
+    // The current event receives the fast header updates. Prefer it over the
     // cached full summary so an in-progress scoring ruling appears in the UI
     // before the next one-second play-by-play reconciliation.
     let sit = current() && current().situation;
@@ -2057,6 +2183,7 @@
     state.summaryRequests = {};
     state.dayFeed = { items: [], primed: false };
     state.dayAuditItems = [];
+    state.dayCategoryFeeds = {};
     state.dayPendingRulings = {};
     state.dayDisappearanceAuditItems = [];
     state.dayBoothNullified = {};
@@ -2117,9 +2244,7 @@
       }
       const tab = e.target.closest('.day-watch-tab');
       if (tab) {
-        state.dayWatchTab = tab.getAttribute('data-day-tab') === 'integrity'
-          ? 'integrity'
-          : 'nullified';
+        state.dayWatchTab = dayWatchTabSafe(tab.getAttribute('data-day-tab'));
         renderDayBooth();
         return;
       }
