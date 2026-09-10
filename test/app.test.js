@@ -294,12 +294,25 @@ async function run() {
   }
   class FakeAudioContext {
     constructor() {
-      this.state = 'running';
+      // Real browsers create a new AudioContext in the 'suspended' state
+      // until a genuine user gesture resumes it (autoplay policy). Starting
+      // this fixture 'running' would hide a bug where the sound-toggle
+      // button forgets to resume a still-suspended context before trying to
+      // play a chime, so the fixture mirrors the stricter, real behavior.
+      this.state = 'suspended';
       this.currentTime = 0;
       this.sampleRate = 44100;
       this.destination = {};
     }
-    resume() { return Promise.resolve(); }
+    resume() {
+      // Real browsers flip .state to 'running' only once the resume()
+      // promise settles, not synchronously when resume() is called. Use a
+      // microtask so a caller that reads ctx.state right after calling
+      // resume() (without awaiting) still observes 'suspended', matching
+      // the spec and catching any code that assumes a synchronous flip.
+      const self = this;
+      return Promise.resolve().then(function () { self.state = 'running'; });
+    }
     createOscillator() { return fakeOscillator(); }
     createGain() { return fakeGain(); }
     createBuffer(channels, frameCount) {
@@ -431,6 +444,17 @@ async function run() {
           if (selector === '.day-watch-tab') {
             return { getAttribute: function () { return tab; } };
           }
+          return null;
+        }
+      }
+    });
+  }
+
+  function clickSoundButton() {
+    elements['day-booth'].dispatch('click', {
+      target: {
+        closest: function (selector) {
+          if (selector === '.day-sound-btn') return {};
           return null;
         }
       }
@@ -712,6 +736,23 @@ async function run() {
   assert.strictEqual(typeof documentListeners.click, 'function');
   documentListeners.click({});
   assert.strictEqual(audio.oscillatorCount, 0, 'unlocking audio is not an alert');
+
+  // Clicking the day-booth sound control must always play an audible test
+  // chime — on the same click that flips the toggle — regardless of which
+  // direction the toggle moves and independent of whether any scoring
+  // ruling exists yet. This is the fix for "testing the sound button does
+  // not play a sound".
+  const oscillatorsBeforeToggleOff = audio.oscillatorCount;
+  clickSoundButton(); // ON -> OFF
+  await settle();
+  assert.ok(audio.oscillatorCount > oscillatorsBeforeToggleOff,
+    'turning the sound control off still plays an audible confirmation chime');
+  const oscillatorsBeforeToggleOn = audio.oscillatorCount;
+  clickSoundButton(); // OFF -> ON
+  await settle();
+  assert.ok(audio.oscillatorCount > oscillatorsBeforeToggleOn,
+    'turning the sound control back on plays an audible confirmation chime');
+
   liveScoreTimer.callback();
   await settle();
   assert.ok(elements['game-content'].innerHTML.indexOf('>POTENTIAL<') !== -1,

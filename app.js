@@ -982,14 +982,13 @@
   /*
    * A pleasant, warm, melodic bell chime alert (ascending arpeggio chord:
    * E5 659Hz, G#5 831Hz, B5 988Hz, E6 1319Hz) with smooth attack and
-   * natural exponential decay.
+   * natural exponential decay. This is the actual sound-generating
+   * primitive; it does not itself gate on alert eligibility so a manual
+   * "does my sound work" preview can reuse the exact same audio path that a
+   * real scoring alert uses (see soundToggleTestChime below).
    */
-  function playBoothAlert(events) {
-    // Keep the sound primitive itself outcome/alert-gated as a second line of
-    // defense. It is invoked with newly discovered scoring alert records below.
-    if (!(events || []).some(isScoringAlertEvent)) return;
-    const ctx = getOrCreateAudioContext();
-    if (!ctx) return;
+  function scheduleBoothChime(ctx) {
+    if (!ctx) return false;
     try {
       const start = ctx.currentTime;
       const notes = [
@@ -1015,9 +1014,37 @@
         osc.start(t);
         osc.stop(t + n.dur);
       });
+      return true;
     } catch (e) {
       // Audio is an enhancement; a browser/device audio failure must not stop polling.
+      return false;
     }
+  }
+
+  function playBoothAlert(events) {
+    // Keep the sound primitive itself outcome/alert-gated as a second line of
+    // defense. It is invoked with newly discovered scoring alert records below.
+    if (!(events || []).some(isScoringAlertEvent)) return;
+    const ctx = getOrCreateAudioContext();
+    if (!ctx) return;
+    scheduleBoothChime(ctx);
+  }
+
+  /*
+   * Lets the listener manually confirm the alert sound is audible. This is
+   * intentionally NOT gated by isScoringAlertEvent/soundEnabled: clicking the
+   * sound control is itself the user gesture that unlocks Web Audio, and the
+   * listener needs to be able to hear the exact alert chime on demand,
+   * independent of whether a live scoring ruling has happened yet.
+   */
+  function soundToggleTestChime() {
+    const ctx = getOrCreateAudioContext();
+    if (!ctx) return;
+    if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+      ctx.resume().then(function () { scheduleBoothChime(ctx); }).catch(function () {});
+      return;
+    }
+    scheduleBoothChime(ctx);
   }
 
   function loadBoothSoundPref() {
@@ -1040,11 +1067,13 @@
     state.soundEnabled = !state.soundEnabled;
     saveBoothSoundPref();
     renderDayBooth(); // refresh the button label/state in the watch header
-    // This user gesture unlocks Web Audio for alerts.
-    unlockBoothAudio();
-    if (state.audioContext && state.audioContext.state === 'suspended') {
-      state.audioContext.resume();
-    }
+    // Clicking the control is itself the user gesture that unlocks Web
+    // Audio, and the listener needs immediate, audible confirmation that
+    // the alert chime actually plays on this browser/device — whichever
+    // direction the toggle went. This mirrors the exact chime a real
+    // scoring alert uses (scheduleBoothChime), so "the sound works" here
+    // means it will also work for a live alert.
+    soundToggleTestChime();
   }
 
   function nullificationNotificationBody(event) {
@@ -1468,8 +1497,8 @@
 
     const soundOn = !!state.soundEnabled;
     const soundTitle = soundOn
-      ? 'Alert sound ON — it plays only after a confirmed nullified scoring play. Click to mute.'
-      : 'Alert sound OFF — click to enable alerts for confirmed nullified scoring plays.';
+      ? 'Alert sound ON — plays a test chime now, and again for any scoring-affecting penalty, review, or challenge. Click to mute.'
+      : 'Alert sound OFF — plays a test chime now so you can confirm it works. Click to re-enable alerts for scoring-affecting rulings.';
     const provenance = '<div class="watch-provenance">' +
       '<span class="source-tag">LIVE PROVIDER: ESPN GAMECAST</span>' +
       '<span>Fast header detection is reconciled against full play-by-play. ' +
