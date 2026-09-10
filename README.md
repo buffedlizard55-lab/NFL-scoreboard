@@ -91,21 +91,29 @@ While selected-day games are live and the page is visible, the app attempts:
 
 | Lane | Nominal schedule | Purpose |
 | --- | ---: | --- |
-| ESPN compact live header | every 150 ms | Lowest-latency score/status/last-play detection across the league |
-| Targeted ESPN game detail | immediately after a changed scoring/scoring-ruling header play or score | One-shot full-play-by-play reconciliation for that game; does not wait for the next base cycle |
-| ESPN game detail | every 1 second per live selected-day game | Full play-by-play reconciliation and score-ruling context |
+| ESPN compact live header | every 100 ms | Lowest-latency score/status/last-play detection across the league |
+| Targeted ESPN game detail | immediately after a changed scoring or scoring-ruling header play or score | One-shot full-play-by-play reconciliation for that game; does not wait for the next base cycle |
+| ESPN game detail | every 500 ms per live selected-day game | Full play-by-play reconciliation and score-ruling context |
 | Selected-day scoreboard | every 15 seconds | Game list and scheduled/final status refresh |
 
 Requests use `cache: 'no-store'` and a shared in-flight guard prevents
-overlapping requests in each lane. A changed header can therefore start one
-scoring-relevant game's detail request immediately; once that game has cached
-play context, ordinary unrelated flags stay on the base cadence. A scoring play
-is recognized not only from the provider's `scoringPlay` flag but also from its
-own play text (touchdown / field goal / safety / try), so a header play that
-omits the flag still triggers targeted reconciliation instead of waiting a
-second for the full play-by-play. If a compact-header reply outlasts its
-150 ms interval, one missed tick is queued and starts immediately after that
-successful reply, rather than waiting for another interval boundary. These
+overlapping requests in each lane. A changed header can therefore start that
+game's detail request immediately. The trigger set is deliberately broad where
+it is cheap: a scoring play recognized from the provider's `scoringPlay` flag
+or from its own text (touchdown / field goal / safety / try), a score change
+with no usable last play, and **any** newly seen source-classified booth record
+— a penalty/flag, coach's challenge, replay review, or under-review play. A
+booth record is reconciled on that single round trip even when the cached
+play-by-play cannot yet tie it to a scoring play, because the header can
+publish the ruling row (or the play it refers to) before the full play-by-play
+response already in the cache does; the strict mapper and feed gates then
+decide whether the record actually changes a score, so a faster fetch never
+fabricates an outcome. Header plays are signature-deduplicated, so an
+unchanged replay of the same record never re-triggers a request, and the
+in-flight guards keep requests non-overlapping. If a compact-header reply
+outlasts its 100 ms interval, one missed tick is queued and starts immediately
+after that successful reply, rather than waiting for another interval
+boundary. These
 attempted intervals are not a freshness or end-to-end latency guarantee:
 upstream publication, network delay/failure, rate limits, browser
 scheduling/background tabs, caching outside this app, and autoplay policy are

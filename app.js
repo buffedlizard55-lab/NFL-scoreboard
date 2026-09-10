@@ -589,11 +589,12 @@
   }
 
   /*
-   * The summary response is already fetched every second for each live game
-   * so the booth can inspect its play-by-play. Its header competition carries
-   * the same score/status-shaped fields used by the scoreboard. Apply only
-   * fields that are actually present; a partial summary (for example one
-   * containing just situation.lastPlay) must never overwrite a good card with
+   * The summary response is already fetched on the fast periodic detail
+   * schedule for each live game so the booth can inspect its play-by-play.
+   * Its header competition carries the same score/status-shaped fields used
+   * by the scoreboard. Apply only fields that are actually present; a partial
+   * summary (for example one containing just situation.lastPlay) must never
+   * overwrite a good card with
    * blank data. This removes the former 0–14.999s wait for the separate
    * scoreboard poll to paint a score that ESPN has already published in the
    * summary response.
@@ -733,14 +734,23 @@
   /*
    * The compact header is the fastest provider lane available to this static
    * client, but it does not always carry enough prior-play context to resolve
-   * a scoring ruling. On a newly published scoring play or a source-classified
-   * booth event, start that one game's full detail request immediately instead
-   * of waiting for the next one-second all-games cycle. Once cached context is
-   * available, ordinary unrelated flags are deliberately skipped.
+   * a scoring ruling. On a newly published scoring play — or any source-
+   * classified booth record (penalty/flag, challenge, replay review, or
+   * under-review play) — start that one game's full detail request immediately
+   * instead of waiting for the next periodic all-games cycle.
    *
-   * This is a one-shot, per changed header play. It does not turn the public
-   * endpoint into an unbounded sub-second detail poll, and the shared
-   * in-flight request guard still prevents duplicate requests.
+   * The booth set is deliberately included even when the cached play-by-play
+   * cannot yet tie the record to a score: the header can publish a ruling row
+   * (for example a flag or an "under review" row) before the full play-by-play
+   * response we already hold contains the scoring play it belongs to, and only
+   * a fresh detail response can decide whether the record can change the
+   * score. Header plays are deduplicated by signature, so an unchanged replay
+   * of the same record never starts a second targeted request, and the shared
+   * in-flight request guard still prevents duplicate or overlapping detail
+   * calls. The strict mapper and feed gates (scoringRulingEvents /
+   * isConfirmedNullifiedScoringEvent / isScoringAlertEvent) are untouched and
+   * decide afterwards whether the record actually affects a score; this lane
+   * only makes that reconciliation happen sooner.
    */
   function headerNeedsImmediateRulingDetail(ev) {
     const play = ev && ev.situation && ev.situation.lastPlay;
@@ -750,24 +760,16 @@
     // before a review/penalty line is published. The provider's compact header
     // does not always set `scoringPlay: true` for a touchdown / field goal /
     // safety, so also accept a scoring play identified from the provider's own
-    // play text. This keeps the fast lane from waiting a full second for the
-    // play-by-play that links a following flag/review to the score.
+    // play text. This keeps the fast lane from waiting a full periodic cycle
+    // for the play-by-play that links a following flag/review to the score.
     if (play.scoringPlay === true ||
         !!NFLMap.scoreKindFromText(play.text || play.shortText || '')) {
       return true;
     }
-    if (!NFLMap.classifyBooth(play)) return false;
-
-    const cached = ev.id != null ? state.daySummaries[ev.id] : null;
-    // With no play-by-play context yet, a provider-classified ruling is the
-    // safest available reason to fetch the initial detail snapshot.
-    if (!cached || !cached.drives) return true;
-
-    const playId = play.id != null ? String(play.id) : '';
-    return NFLMap.scoringRulingEvents(cached.drives, play).some(function (event) {
-      if (!event || !event.scoringRuling) return false;
-      return event.live || (!!playId && event.id != null && String(event.id) === playId);
-    });
+    // A source-classified booth record can directly change a scoring outcome
+    // (nullify, retain, or award points), so reconcile its game immediately
+    // rather than waiting for the periodic detail cycle.
+    return !!NFLMap.classifyBooth(play);
   }
 
   function refreshLiveScores() {
@@ -827,16 +829,16 @@
             immediateDetailIds.push(ev.id);
           }
         });
-        // Do not wait for the next one-second scheduler tick when the header
-        // just published a possible scoring ruling or score change. This call
-        // is nonblocking and skips any game whose ordinary periodic detail
+        // Do not wait for the next periodic detail tick when the header just
+        // published a possible scoring ruling or score change. This call is
+        // nonblocking and skips any game whose ordinary periodic detail
         // request is already in flight.
         if (immediateDetailIds.length) refreshDayBooth(immediateDetailIds);
         if (fastPlayChanged) {
           renderDayBooth();
           // The fast header is also useful while a listener is watching one
           // of the focused ruling categories: render that view immediately,
-          // while the targeted or one-second play-by-play response reconciles it.
+          // while the targeted or periodic play-by-play response reconciles it.
           if (state.summary && current() && RULING_TABS.indexOf(state.activeTab) >= 0) {
             renderGameHeader();
             renderTabContent();
@@ -883,12 +885,12 @@
 
   /*
    * Fetch play-by-play for every selected-day game that has (or had) action:
-   * live games on every one-second scoring-rulings cycle, an immediate
-   * targeted pass after a scoring-relevant header change, then one final
-   * snapshot after the scoreboard reports it finished. Each response updates
-   * cached data and the focused watch; larger non-ruling tabs repaint at most
-   * every five seconds. The interval is an attempted client schedule, not an
-   * upstream-data latency guarantee.
+   * live games on every half-second scoring-rulings cycle, an immediate
+   * targeted pass after a changed scoring or scoring-ruling header record,
+   * then one final snapshot after the scoreboard reports it finished. Each
+   * response updates cached data and the focused watch; larger non-ruling
+   * tabs repaint at most every five seconds. The interval is an attempted
+   * client schedule, not an upstream-data latency guarantee.
    */
   function refreshDayBooth(targetEventIds) {
     if (!state.events.length) {
@@ -924,7 +926,7 @@
             if (open && open.id === ev.id) {
               state.summary = json;
               // Reviews render on every response. Other large tabs retain their
-              // prior five-second paint cadence to avoid one-second DOM churn.
+              // prior five-second paint cadence to avoid frequent DOM churn.
               const now = Date.now();
               const shouldRenderGame = NFLRefresh.shouldRenderGameContent(
                 state.activeTab, state.lastGameContentRenderAt, now);
@@ -947,7 +949,7 @@
       );
     });
     // Paint an empty/loading feed once, but do not rebuild an unchanged feed on
-    // every one-second tick when there is no request to make.
+    // every periodic detail tick when there is no request to make.
     if (!jobs.length && !state.dayFeed.primed) renderDayBooth();
   }
 
@@ -1795,7 +1797,7 @@
   function liveLastPlay() {
     // The current event receives the fast header updates. Prefer it over the
     // cached full summary so an in-progress scoring ruling appears in the UI
-    // before the next one-second play-by-play reconciliation.
+    // before the next full play-by-play reconciliation.
     let sit = current() && current().situation;
     if ((!sit || !sit.lastPlay) && state.summary) sit = summarySituation(state.summary);
     return (sit && sit.lastPlay) ? sit.lastPlay : null;

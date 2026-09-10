@@ -40,10 +40,10 @@ function harness(visible) {
 
 console.log('NFLRefresh polling tests');
 
-ok('exports the documented 15-second board, fast 150ms live-score, and 1-second review cadences', function () {
+ok('exports the documented 15-second board, fast 100ms live-score, and 500ms review cadences', function () {
   assert.strictEqual(NFLRefresh.SCOREBOARD_INTERVAL_MS, 15000);
-  assert.strictEqual(NFLRefresh.LIVE_SCORES_INTERVAL_MS, 150);
-  assert.strictEqual(NFLRefresh.LIVE_REVIEWS_INTERVAL_MS, 1000);
+  assert.strictEqual(NFLRefresh.LIVE_SCORES_INTERVAL_MS, 100);
+  assert.strictEqual(NFLRefresh.LIVE_REVIEWS_INTERVAL_MS, 500);
 });
 
 ok('renders every focused scoring-ruling category immediately while limiting larger DOM paints to 5 seconds', function () {
@@ -61,7 +61,7 @@ ok('renders every focused scoring-ruling category immediately while limiting lar
 ok('schedules board, live-score, and review callbacks independently', function () {
   const h = harness({ value: true });
   assert.strictEqual(h.scheduled.length, 3);
-  assert.deepStrictEqual(h.scheduled.map(function (timer) { return timer.ms; }), [15000, 150, 1000]);
+  assert.deepStrictEqual(h.scheduled.map(function (timer) { return timer.ms; }), [15000, 100, 500]);
 
   h.scheduled[0].callback();
   assert.strictEqual(h.scoreCalls(), 1);
