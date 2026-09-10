@@ -1,6 +1,6 @@
 # Live nullified-score feed and scoring-ruling views: source and field verification
 
-Last reviewed: **2026-08-30**
+Last reviewed: **2026-08-30** · latency lanes re-reviewed **2026-09-10**
 
 This document distinguishes the data the app actually reads from the official
 rules material used to constrain its interpretation. It is intentionally not a
@@ -99,21 +99,31 @@ than assigned to either team.
   [api.nfl.com/docs/identity/register](https://api.nfl.com/docs/identity/register/index.html)
   describes OAuth client-credential access. This repository has no such
   credential or demonstrated browser-facing NFL live-data contract.
-- The app schedules the compact header request every 150 ms while selected-day
-  games are live, game-detail reconciliation every second, and a selected-day
-  scoreboard refresh every 15 seconds. When a changed header play is provider-
-  classified as a scoring play or a scoring-linked ruling—or the header score
-  changes without a usable last play—it also starts one targeted detail
-  reconciliation immediately rather than waiting for that base second. A
-  scoring play is recognized from the provider's `scoringPlay` flag and, as a
-  fallback, from the play's own text (`scoreKindFromText`: touchdown, field
-  goal, safety, extra point, two-point try). That removes the up-to-one-second
-  wait for the full play-by-play on the common case where the compact header
-  publishes a scoring play without the flag. Shared in-flight guards prevent
-  duplicate detail calls; if a header reply spans one 150 ms tick, the client
-  keeps just one queued follow-up and starts it after the successful reply
-  clears. These are attempted client schedules, not an upstream publication or
-  end-to-end latency guarantee.
+- The app schedules the compact header request every 100 ms while selected-day
+  games are live, game-detail reconciliation every 500 ms per live game, and a
+  selected-day scoreboard refresh every 15 seconds. When a changed header play
+  is a scoring play, any source-classified booth record (penalty/flag,
+  challenge, replay review, or under-review play), or the header score changes
+  without a usable last play, it also starts one targeted detail
+  reconciliation immediately rather than waiting for the next periodic detail
+  cycle. A scoring play is recognized from the provider's `scoringPlay` flag
+  and, as a fallback, from the play's own text (`scoreKindFromText`:
+  touchdown, field goal, safety, extra point, two-point try). A booth record
+  is reconciled on that same round trip even when the cached play-by-play
+  cannot yet tie it to a scoring play, because the header can publish the
+  ruling row (or the play it refers to) before the cached full play-by-play
+  does; the mapper's strict scoring-linkage and feed gates decide afterwards
+  whether the record changes a score, so an earlier fetch never fabricates an
+  outcome. Header plays are deduplicated by signature, so an unchanged replay
+  of the same record never triggers another targeted request. That removes the
+  up-to-half-second periodic wait on the common case where the compact header
+  publishes a scoring play or ruling before the periodic detail response
+  contains its context. Shared in-flight guards prevent duplicate or
+  overlapping detail calls; if a header reply spans one 100 ms tick, the
+  client keeps just one queued follow-up and starts it after the successful
+  reply clears. These are
+  attempted client schedules, not an upstream publication or end-to-end
+  latency guarantee.
 - Provider publication timing, request duration/failure, browser scheduling
   (especially background tabs), rate limits, caching outside the app, and
   autoplay policy can delay or suppress an update or sound. The app requests
@@ -136,10 +146,15 @@ under-review and red zone; and the strict rule that only a confirmed nullified
 scoring play can enter the all-games live feed or emit
 sound/desktop-notification alerts.
 
-> **Verification status (2026-08-30).** Live endpoint re-verification was
-> performed for ESPN event `401873286` with a network-connected client when this
-> field/evidence inventory was first assembled; the checked payload shape is
-> preserved in `test/fixtures/sample.json` so the mapping and app tests run
-> offline. When running in an environment with no outbound network, the live
-> provider calls cannot be re-fetched; the fixture and the static tests remain
-> the verification baseline in that case.
+> **Verification status (2026-08-30; latency-lane revision 2026-09-10).** Live
+> endpoint re-verification was performed for ESPN event `401873286` with a
+> network-connected client when this field/evidence inventory was first
+> assembled; the checked payload shape is preserved in `test/fixtures/sample.json`
+> so the mapping and app tests run offline. The 2026-09-10 latency revision
+> tightened the fast-header cadence to 100 ms, the full-detail cadence to
+> 500 ms, and made every newly seen source-classified booth header record start
+> one immediate targeted reconciliation; it did not change any mapper field,
+> evidence, or outcome gate, and the offline fixture suite still passes in full.
+> When running in an environment with no outbound network, the live provider
+> calls cannot be re-fetched; the fixture and the static tests remain the
+> verification baseline in that case.

@@ -185,7 +185,7 @@ async function run() {
   // The real summary endpoint's header competition contains the same score
   // and status fields used by the scoreboard. Keep this API-shaped fixture
   // linked to the live scoreboard competition so detail-response hydration is
-  // exercised alongside the one-second booth refresh.
+  // exercised alongside the periodic booth refresh.
   summary.header = { competitions: [competition] };
   // Add an API-shaped TD-under-review sequence. The same review row is
   // changed to a reversal later, so the smoke test covers an evidence-based
@@ -333,7 +333,7 @@ async function run() {
       if (url.indexOf('/scoreboard/header') !== -1) {
         // Observed header-feed shape: event id, flat competitors, fullStatus,
         // situation and play-by-play availability. Keep it derived from the
-        // existing live fixtures so every one-second tick is deterministic.
+        // existing live fixtures so every fast tick is deterministic.
         function headerEvent(event) {
           const comp = event.competitions[0];
           return {
@@ -437,9 +437,9 @@ async function run() {
     });
   }
 
-  assert.deepStrictEqual(timers.map(function (timer) { return timer.ms; }), [15000, 150, 1000]);
-  const liveScoreTimer = timers.find(function (timer) { return timer.ms === 150; });
-  const reviewTimer = timers.find(function (timer) { return timer.ms === 1000; });
+  assert.deepStrictEqual(timers.map(function (timer) { return timer.ms; }), [15000, 100, 500]);
+  const liveScoreTimer = timers.find(function (timer) { return timer.ms === 100; });
+  const reviewTimer = timers.find(function (timer) { return timer.ms === 500; });
   assert.ok(liveScoreTimer && reviewTimer);
   assert.strictEqual(fetches.filter(function (url) {
     return url.indexOf('/sports/football/nfl/scoreboard') !== -1;
@@ -454,7 +454,7 @@ async function run() {
   assert.ok(initialWatch.indexOf('Confirmed nullified scoring plays') !== -1);
   assert.ok(initialWatch.indexOf('LIVE PROVIDER: ESPN GAMECAST') !== -1);
   assert.ok(initialWatch.indexOf('Field verification &amp; limits') !== -1);
-  assert.ok(initialWatch.indexOf('fast last-play header 0.15s attempted') !== -1);
+  assert.ok(initialWatch.indexOf('fast last-play header 0.1s attempted') !== -1);
   assert.ok(initialWatch.indexOf('TOUCHDOWN NULLIFIED by Penalty') !== -1);
   assert.ok(initialWatch.indexOf('data-day-tab="nullified"') !== -1);
   assert.ok(initialWatch.indexOf('data-day-tab="integrity"') !== -1);
@@ -531,8 +531,11 @@ async function run() {
   assert.strictEqual(notifications.length, 0);
 
   // A changed header scoring-review candidate starts that game's full detail
-  // reconciliation immediately; it does not wait for the one-second review
-  // timer. An unrelated flag with cached context does not create extra load.
+  // reconciliation immediately; it does not wait for the periodic review
+  // timer. A provider-classified penalty that the cached play-by-play cannot
+  // yet tie to a scoring play still gets one immediate targeted reconciliation,
+  // because only a fresh detail response can decide whether the flag can
+  // change the score. The signature dedupe keeps that to one request.
   const summariesBeforeFastCandidate = fetches.filter(function (url) {
     return url.indexOf('/summary') !== -1;
   }).length;
@@ -547,7 +550,9 @@ async function run() {
     return url.indexOf('/summary') !== -1;
   }).length;
   // A substantive normal snap between the old scoring ruling and this flag
-  // proves the flag has no causal scoring context.
+  // proves the flag has no causal scoring context — yet the header record is
+  // still reconciled on the next round trip instead of on a later periodic
+  // cycle, so a scoring-linkable ruling is never left waiting.
   const ordinaryHeaderContext = {
     id: 'ordinary-header-context', plays: [{
       id: 'ordinary-header-context-play', sequenceNumber: '9199900',
@@ -569,8 +574,15 @@ async function run() {
   await settle();
   assert.strictEqual(fetches.filter(function (url) {
     return url.indexOf('/summary') !== -1;
-  }).length, summariesAfterFastCandidate,
-  'an unrelated header flag does not bypass the normal all-games detail cadence');
+  }).length, summariesAfterFastCandidate + 1,
+  'a new header penalty triggers one immediate targeted reconciliation');
+  // A repeat of the same unchanged header play must not fetch again.
+  liveScoreTimer.callback();
+  await settle();
+  assert.strictEqual(fetches.filter(function (url) {
+    return url.indexOf('/summary') !== -1;
+  }).length, summariesAfterFastCandidate + 1,
+  'an unchanged header penalty is deduplicated and never re-fetched');
   summary.drives.previous.splice(summary.drives.previous.indexOf(ordinaryHeaderContext), 1);
 
   const summariesBeforeFastScore = fetches.filter(function (url) {
@@ -595,7 +607,7 @@ async function run() {
   // touchdown / field goal / safety. A scoring play recognized from its own
   // text must still start targeted reconciliation so the linking penalty/
   // review context arrives one round trip sooner rather than on the next full
-  // one-second detail cycle.
+  // periodic detail cycle.
   const summariesBeforeFastText = fetches.filter(function (url) {
     return url.indexOf('/summary') !== -1;
   }).length;
