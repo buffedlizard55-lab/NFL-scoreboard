@@ -46,15 +46,16 @@ or penalty; the live all-games feed publishes only confirmed nullifications.
 
 | State | Meaning | Where it appears | Sound / desktop notification |
 | --- | --- | --- | --- |
-| **Potential** | A scoring-linked ruling is pending in the provider feed. | Its relevant game-level category only (and the matching all-games tracking tab). | Never. It is visual-only. |
-| **Nullified** | The source gives explicit nullification wording, a contiguous overturned scoring ruling, or a complete, causally tied one-team score rollback. | The live all-games feed and the Nullified / Red Zone tabs (per-game and all-games). | **Only this state** may alert. |
-| **No rollback** | The source published a final retaining result or moved to a normal next play without a rollback. | Its relevant game-level category only (and the matching all-games tracking tab). | Never. |
-| **Data check** | The provider's score changed without a causal ruling, or a pending record disappeared before a result. The record needs review. | The separate all-games and game-level Data checks views. | Never. |
+| **Potential** | A scoring-linked ruling (review, challenge, or penalty) is pending, or a red zone play is being challenged for breaking the boundary for a touchdown. | Its relevant game-level category, the Red Zone tab, and the all-games live replay feed. | Pleasant bell chime sound and desktop notification alert. |
+| **Nullified** | The source gives explicit nullification wording, a contiguous overturned scoring ruling, or a complete, causally tied one-team score rollback. | The live all-games feed and the Nullified / Red Zone tabs (per-game and all-games). | Pleasant bell chime sound and desktop notification alert. |
+| **Awarded** | A red zone touchdown boundary challenge is overturned to award a touchdown. | The live all-games feed and the Red Zone / Challenges / Replay tabs. | Pleasant bell chime sound and desktop notification alert. |
+| **No rollback** | The source published a final retaining result or moved to a normal next play without a rollback. | Its relevant game-level category only (and the matching all-games tracking tab). | Never; remains a silent tracking record. |
+| **Data check** | The provider's score changed without a causal ruling, or a pending record disappeared before a result. The record needs review. | The separate all-games and game-level Data checks views. | Never; remains a silent audit record. |
 
-Notifications are deduplicated by scoring play. Thus a pending record updated
-in place to a nullified ruling can notify once; repeated responses, multiple
-source rows in the same ruling sequence, retained outcomes, and data checks do
-not create extra alerts.
+Notifications are deduplicated by scoring play and watch state. Thus a pending record updated
+in place to a nullified ruling can notify once for the initial pending review and once for the confirmed
+nullification; repeated responses, multiple source rows in the same ruling sequence, retained outcomes,
+and data checks do not create extra alerts.
 
 ## Evidence rules
 

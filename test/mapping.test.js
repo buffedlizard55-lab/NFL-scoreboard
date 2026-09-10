@@ -1288,4 +1288,100 @@ ok('isConfirmedNullifiedScoringEvent: strict all-games gate excludes potential, 
   });
 });
 
+ok('isRedZoneTouchdownChallenge: flags red-zone boundary/plane touchdown challenges directly affecting scoring', function () {
+  // 1. Pending coach's challenge on whether runner broke the plane of the goal line in red zone
+  const pendingChallengePlay = {
+    id: 'rz-td-chal', sequenceNumber: '100', type: { text: 'Pass Reception' },
+    text: 'San Francisco challenged whether the runner broke the plane of the goal line.',
+    awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false,
+    start: { yardsToEndzone: 2, downDistanceText: '1st & Goal at LAC 2' }
+  };
+  const eventsPending = NFLMap.scoringRulingEvents({ previous: [{ id: 'd1', team: { abbreviation: 'SF' }, plays: [pendingChallengePlay] }] });
+  assert.strictEqual(eventsPending.length, 1);
+  assert.strictEqual(eventsPending[0].scoringRuling, true);
+  assert.strictEqual(eventsPending[0].scoringWatch, 'pending');
+  assert.strictEqual(eventsPending[0].isRedZoneTouchdownChallenge, true);
+  assert.strictEqual(NFLMap.isScoringAlertEvent(eventsPending[0]), true);
+
+  // 2. Overturned red zone touchdown challenge
+  const overturnedPlay = {
+    id: 'rz-td-rev', sequenceNumber: '105', type: { text: 'Replay Review' },
+    text: 'Review of whether the player broke the boundary for a touchdown was REVERSED.',
+    awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false,
+    start: { yardsToEndzone: 1, downDistanceText: '1st & Goal at LAC 1' }
+  };
+  const eventsOverturned = NFLMap.scoringRulingEvents({ previous: [{ id: 'd1', team: { abbreviation: 'SF' }, plays: [overturnedPlay] }] });
+  assert.strictEqual(eventsOverturned.length, 1);
+  assert.strictEqual(eventsOverturned[0].scoringRuling, true);
+  assert.strictEqual(eventsOverturned[0].isRedZoneTouchdownChallenge, true);
+  assert.strictEqual(eventsOverturned[0].scoringWatch === 'nullified' || eventsOverturned[0].scoringWatch === 'awarded', true);
+  assert.strictEqual(NFLMap.isScoringAlertEvent(eventsOverturned[0]), true);
+
+  // 3. Upheld red zone touchdown challenge is retained
+  const upheldPlay = {
+    id: 'rz-td-upheld', sequenceNumber: '110', type: { text: 'Pass Reception' },
+    text: 'San Francisco challenged the ruling of short of the goal line, and the play was Upheld.',
+    awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false,
+    start: { yardsToEndzone: 3, downDistanceText: '2nd & Goal at LAC 3' }
+  };
+  const eventsUpheld = NFLMap.scoringRulingEvents({ previous: [{ id: 'd1', team: { abbreviation: 'SF' }, plays: [upheldPlay] }] });
+  assert.strictEqual(eventsUpheld.length, 1);
+  assert.strictEqual(eventsUpheld[0].scoringRuling, true);
+  assert.strictEqual(eventsUpheld[0].scoringWatch, 'retained');
+  assert.strictEqual(NFLMap.isScoringAlertEvent(eventsUpheld[0]), false, 'retained ruling does not alert');
+
+  // 4. Non-scoring red zone review (e.g. catch for 5 yards at 12 yard line) is NOT a scoring ruling
+  const nonScoringRzReview = {
+    id: 'rz-catch', sequenceNumber: '115', type: { text: 'Pass Reception' },
+    text: 'San Francisco challenged the catch ruling, and the play was Upheld.',
+    awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false,
+    start: { yardsToEndzone: 12, downDistanceText: '1st & 10 at LAC 12' }
+  };
+  const eventsNonScoring = NFLMap.scoringRulingEvents({ previous: [{ id: 'd1', team: { abbreviation: 'SF' }, plays: [nonScoringRzReview] }] });
+  assert.strictEqual(eventsNonScoring.length, 0, 'non-scoring red zone catch review must not be flagged as scoring ruling');
+
+  // 5. Non-scoring red zone penalty (e.g. false start at 8 yard line) is NOT a scoring ruling
+  const nonScoringRzPenalty = {
+    id: 'rz-pen', sequenceNumber: '120', type: { text: 'Penalty' },
+    text: 'PENALTY on SF-T.Williams, False Start, 5 yards, enforced at LAC 8 - No Play.',
+    awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: true,
+    penalty: { yards: 5, type: { text: 'False Start' } },
+    start: { yardsToEndzone: 8, downDistanceText: '1st & Goal at LAC 8' }
+  };
+  const eventsNonScoringPen = NFLMap.scoringRulingEvents({ previous: [{ id: 'd1', team: { abbreviation: 'SF' }, plays: [nonScoringRzPenalty] }] });
+  assert.strictEqual(eventsNonScoringPen.length, 0, 'non-scoring red zone penalty must not be flagged as scoring ruling');
+});
+
+ok('isScoringAlertEvent: accurately identifies all plays directly affecting scoring outcomes', function () {
+  // Confirmed nullification
+  assert.strictEqual(NFLMap.isScoringAlertEvent({
+    scoringRuling: true, scoringWatch: 'nullified', nullified: true
+  }), true);
+
+  // Potential nullification (scoring play under review / challenge / penalty)
+  assert.strictEqual(NFLMap.isScoringAlertEvent({
+    scoringRuling: true, scoringWatch: 'pending', nullified: false
+  }), true);
+
+  // Red zone touchdown challenge
+  assert.strictEqual(NFLMap.isScoringAlertEvent({
+    redZone: true, isRedZoneTouchdownChallenge: true, scoringRuling: true, scoringWatch: 'pending'
+  }), true);
+
+  // Retained scoring ruling (no score changed) -> should NOT alert
+  assert.strictEqual(NFLMap.isScoringAlertEvent({
+    scoringRuling: true, scoringWatch: 'retained', nullified: false
+  }), false);
+
+  // Data check / integrity issue -> should NOT alert
+  assert.strictEqual(NFLMap.isScoringAlertEvent({
+    scoringRuling: true, scoringWatch: 'irregular', irregularity: true
+  }), false);
+
+  // Non-scoring event -> should NOT alert
+  assert.strictEqual(NFLMap.isScoringAlertEvent({
+    scoringRuling: false, nullified: false
+  }), false);
+});
+
 console.log('\nAll ' + pass + ' mapping tests passed ✓');

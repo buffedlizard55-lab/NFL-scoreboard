@@ -63,9 +63,10 @@ The mapper intentionally separates source evidence from an inferred ruling:
 
 | Watch state | Required evidence | Display location | Notification behavior |
 | --- | --- | --- | --- |
-| **Potential** | A penalty/review/challenge is causally contiguous with a score, but no final removal evidence is published | Its separate scoring-linked game category (Flags, Challenges, Replay, or Under review) and the matching all-games tracking tab, never the all-games outcome feed | Visual only; never sound or desktop notification. |
-| **Nullified** | Explicit score-nullification wording; a contiguous overturned scoring ruling; or a complete, causally tied one-team running-score rollback | The all-games **Live nullified** feed and the Nullified / Red Zone tabs (per-game and all-games) | The only state eligible for visual alert emphasis, sound, and an already-granted desktop notification. |
-| **No rollback** | A final non-nullified result, or the source moves to a normal next play without a rollback | Its separate scoring-linked game category only and the matching all-games tracking tab | Visual audit record only. |
+| **Potential** | A penalty/review/challenge is causally contiguous with a score, or a red zone play is challenged/reviewed for breaking the boundary for a touchdown | Relevant category tabs (Flags, Challenges, Replay, or Under review), Red Zone tab, and the all-games replay feed | Auditory pleasant bell chime and desktop notification alert. |
+| **Nullified** | Explicit score-nullification wording; a contiguous overturned scoring ruling; or a complete, causally tied one-team running-score rollback | The all-games **Live nullified** feed and the Nullified / Red Zone tabs (per-game and all-games) | Auditory pleasant bell chime and desktop notification alert. |
+| **Awarded** | A red zone touchdown boundary challenge is overturned to award a touchdown | Red Zone tab, Challenges/Replay tabs, and live feed | Auditory pleasant bell chime and desktop notification alert. |
+| **No rollback** | A final non-nullified result, or the source moves to a normal next play without a rollback | Its separate scoring-linked game category only and the matching all-games tracking tab | Visual audit record only; stays silent. |
 | **Data check** | A complete provider running score falls without a causal scoring ruling, or a pending source record disappears before an outcome | Separate all-games and game-level Data checks views | Visual audit record only; the app does not guess a nullification. |
 
 The all-games panel renders these categories in **separate tabs** (Live
