@@ -100,6 +100,19 @@
       : boothEventNullified(e);
   }
 
+  function isScoringAlertEvent(e) {
+    if (!e) return false;
+    if (typeof NFLMap.isScoringAlertEvent === 'function') {
+      return NFLMap.isScoringAlertEvent(e);
+    }
+    if (e.irregularity || e.kind === 'integrity' || e.scoringWatch === 'irregular') return false;
+    if (confirmedNullifiedScoringEvent(e)) return true;
+    if (e.scoringRuling && (e.scoringWatch === 'pending' || e.scoringWatch === 'awarded')) return true;
+    if (e.redZone && e.isRedZoneTouchdownChallenge &&
+        (e.scoringWatch === 'pending' || e.scoringWatch === 'awarded')) return true;
+    return false;
+  }
+
   /* A scoring play can yield more than one source row (e.g. "under review"
    * followed by the replay verdict). Counts and notification identities use
    * the scoring play, rather than double-counting that ruling sequence. */
@@ -112,6 +125,13 @@
         : (e.id != null ? String(e.id) : (e.key != null ? String(e.key) : '')));
     const gameId = e.gameId != null ? String(e.gameId) : '';
     return gameId + ':' + playId;
+  }
+
+  function scoringAlertIdentity(e) {
+    if (!e) return '';
+    const base = scoringIdentity(e);
+    const watch = e.scoringWatch || (e.nullified ? 'nullified' : '');
+    return base ? (base + ':' + watch) : '';
   }
 
   function uniqueScoringEvents(events, predicate) {
@@ -933,83 +953,65 @@
 
   /*
    * Browsers may block audio until the listener has interacted with the page.
-   * A gesture unlocks Web Audio for a later confirmed scoring nullification;
-   * pending reviews, challenges, flags, and integrity checks never play sound.
+   * A gesture unlocks Web Audio for a scoring alert;
+   * non-scoring plays and integrity checks remain silent.
    */
   function unlockBoothAudio() {
-    if (state.audioContext || typeof AudioContext === 'undefined') return;
+    const AudioCtx = (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) ||
+      (typeof AudioContext !== 'undefined' ? AudioContext : null);
+    if (!AudioCtx) return;
     try {
-      state.audioContext = new AudioContext();
-      if (state.audioContext.state === 'suspended') state.audioContext.resume();
+      if (!state.audioContext) {
+        state.audioContext = new AudioCtx();
+      }
+      if (state.audioContext && state.audioContext.state === 'suspended') {
+        state.audioContext.resume();
+      }
     } catch (e) {
       state.audioContext = null;
     }
   }
 
+  function getOrCreateAudioContext() {
+    unlockBoothAudio();
+    return state.audioContext;
+  }
+
   /*
-   * A gentle 3-second "rain" alert: a soft low-passed noise bed (steady
-   * rainfall) that fades in and out, plus three quiet descending sine
-   * "droplet" plips so it clearly reads as water. This replaced an earlier
-   * 180 Hz sawtooth buzzer that was unpleasant to hear repeatedly.
+   * A pleasant, warm, melodic bell chime alert (ascending arpeggio chord:
+   * E5 659Hz, G#5 831Hz, B5 988Hz, E6 1319Hz) with smooth attack and
+   * natural exponential decay.
    */
   function playBoothAlert(events) {
-    // Keep the sound primitive itself outcome-gated as a second line of
-    // defense. It is invoked with newly discovered mapper records below.
-    if (!(events || []).some(confirmedNullifiedScoringEvent)) return;
-    const ctx = state.audioContext;
+    // Keep the sound primitive itself outcome/alert-gated as a second line of
+    // defense. It is invoked with newly discovered scoring alert records below.
+    if (!(events || []).some(isScoringAlertEvent)) return;
+    const ctx = getOrCreateAudioContext();
     if (!ctx) return;
     try {
       const start = ctx.currentTime;
-      const DURATION = 3; // seconds — matches the old alert length
+      const notes = [
+        { time: 0.0, freq: 659.25, gain: 0.15, dur: 0.8 },
+        { time: 0.12, freq: 830.61, gain: 0.16, dur: 0.8 },
+        { time: 0.24, freq: 987.77, gain: 0.18, dur: 0.9 },
+        { time: 0.38, freq: 1318.51, gain: 0.20, dur: 1.1 }
+      ];
 
-      // --- Rain bed: brown-ish noise, softened by a low-pass filter ---
-      const sampleRate = ctx.sampleRate || 44100;
-      const frameCount = Math.floor(sampleRate * DURATION);
-      const buffer = ctx.createBuffer(1, frameCount, sampleRate);
-      const data = buffer.getChannelData(0);
-      // Integrate white noise (leaky integrator) so the hiss is deep and
-      // soft like rainfall instead of harsh static.
-      let last = 0;
-      for (let i = 0; i < frameCount; i += 1) {
-        const white = Math.random() * 2 - 1;
-        last = (last + 0.02 * white) / 1.02;
-        data[i] = last * 3.5;
-      }
-      const rain = ctx.createBufferSource();
-      rain.buffer = buffer;
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(1000, start);
-      const rainGain = ctx.createGain();
-      rainGain.gain.setValueAtTime(0.0001, start);
-      rainGain.gain.linearRampToValueAtTime(0.22, start + 0.5);   // gentle fade in
-      rainGain.gain.setValueAtTime(0.22, start + 2.3);            // hold
-      rainGain.gain.linearRampToValueAtTime(0.0001, start + DURATION); // fade out
-      rain.connect(filter);
-      filter.connect(rainGain);
-      rainGain.connect(ctx.destination);
-      rain.start(start);
-      rain.stop(start + DURATION);
-
-      // --- Water droplets: quiet falling sine "plips" over the rain bed ---
-      [
-        { at: 0.7, freq: 1200 },
-        { at: 1.4, freq: 900 },
-        { at: 2.1, freq: 1050 }
-      ].forEach(function (drop) {
+      notes.forEach(function (n) {
+        const t = start + n.time;
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        const t = start + drop.at;
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(drop.freq, t);
-        osc.frequency.linearRampToValueAtTime(drop.freq * 0.55, t + 0.15);
+        osc.frequency.setValueAtTime(n.freq, t);
+
         gain.gain.setValueAtTime(0.0001, t);
-        gain.gain.linearRampToValueAtTime(0.07, t + 0.02);
-        gain.gain.linearRampToValueAtTime(0.0001, t + 0.25);
+        gain.gain.linearRampToValueAtTime(n.gain, t + 0.015);
+        gain.gain.linearRampToValueAtTime(0.0001, t + n.dur);
+
         osc.connect(gain);
         gain.connect(ctx.destination);
         osc.start(t);
-        osc.stop(t + 0.3);
+        osc.stop(t + n.dur);
       });
     } catch (e) {
       // Audio is an enhancement; a browser/device audio failure must not stop polling.
@@ -1036,9 +1038,7 @@
     state.soundEnabled = !state.soundEnabled;
     saveBoothSoundPref();
     renderDayBooth(); // refresh the button label/state in the watch header
-    // This user gesture can unlock Web Audio for a later *real* alert. It
-    // intentionally does not play a preview: sound is reserved for a
-    // confirmed nullified scoring play.
+    // This user gesture unlocks Web Audio for alerts.
     unlockBoothAudio();
     if (state.audioContext && state.audioContext.state === 'suspended') {
       state.audioContext.resume();
@@ -1046,26 +1046,45 @@
   }
 
   function nullificationNotificationBody(event) {
-    const scoring = event && (event.scoringPlay || event.relatedScoringPlay);
-    const type = scoring && scoring.scoreLabel ? scoring.scoreLabel : 'Scoring play';
     const game = event && event.shortName ? event.shortName : 'NFL game';
-    const detail = event && event.removesPoints && event.pointsRemoved
-      ? ' ' + event.pointsRemoved + ' point' + (event.pointsRemoved === 1 ? '' : 's') + ' removed.'
-      : ' Source text reports the score was nullified.';
-    return game + ' — ' + type + ' nullified.' + detail;
+    if (event && (event.scoringWatch === 'nullified' || confirmedNullifiedScoringEvent(event))) {
+      const scoring = event.scoringPlay || event.relatedScoringPlay;
+      const type = scoring && scoring.scoreLabel ? scoring.scoreLabel : 'Scoring play';
+      const detail = event.removesPoints && event.pointsRemoved
+        ? ' ' + event.pointsRemoved + ' point' + (event.pointsRemoved === 1 ? '' : 's') + ' removed.'
+        : ' Source text reports the score was nullified.';
+      return game + ' — ' + type + ' nullified.' + detail;
+    }
+    if (event && (event.scoringWatch === 'awarded' || (event.isRedZoneTouchdownChallenge && event.result === 'overturned'))) {
+      return game + ' — Touchdown awarded on review!';
+    }
+    if (event && event.isRedZoneTouchdownChallenge) {
+      return game + ' — Red zone challenge: reviewing whether player broke the boundary for a touchdown.';
+    }
+    if (event && event.scoringWatch === 'pending') {
+      const scoring = event.scoringPlay || event.relatedScoringPlay;
+      const type = scoring && scoring.scoreLabel ? scoring.scoreLabel : 'Scoring play';
+      const action = event.kind === 'penalty' ? 'penalty flag' :
+        (event.kind === 'challenge' ? "coach's challenge" : 'play under review');
+      return game + ' — ' + type + ' ' + action + ' (potential nullification).';
+    }
+    return game + ' — Scoring ruling update.';
   }
 
   function notifyNullifiedScoringPlays(events) {
     // Do not request permission or prompt the user. If the browser has already
-    // granted desktop notifications, use that channel only for a confirmed
-    // nullified score; otherwise the visual feed remains the notification.
+    // granted desktop notifications, use that channel only for scoring alerts;
+    // otherwise the visual feed remains the notification.
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     (events || []).forEach(function (event) {
-      if (!confirmedNullifiedScoringEvent(event)) return;
+      if (!isScoringAlertEvent(event)) return;
       try {
-        new Notification('NFL scoring play nullified', {
+        const key = scoringAlertIdentity(event) || ('nfl-' + Date.now());
+        const isNull = event.scoringWatch === 'nullified' || confirmedNullifiedScoringEvent(event);
+        const title = isNull ? 'NFL scoring play nullified' : 'NFL scoring ruling alert';
+        new Notification(title, {
           body: nullificationNotificationBody(event),
-          tag: 'nfl-nullified-' + scoringIdentity(event),
+          tag: 'nfl-nullified-' + key,
           renotify: true
         });
       } catch (e) { /* desktop notifications are optional enhancement */ }
@@ -1074,8 +1093,8 @@
 
   function primeScoringAlerts(events) {
     (events || []).forEach(function (event) {
-      if (!confirmedNullifiedScoringEvent(event)) return;
-      const key = scoringIdentity(event);
+      if (!isScoringAlertEvent(event)) return;
+      const key = scoringAlertIdentity(event);
       if (key) state.alertedScoringKeys[key] = true;
     });
   }
@@ -1083,16 +1102,13 @@
   function announceNewBoothEvents(fresh) {
     const announced = [];
     (fresh || []).forEach(function (event) {
-      // Pending, retained and integrity rows are intentionally silent.
-      if (!confirmedNullifiedScoringEvent(event)) return;
-      const key = scoringIdentity(event);
+      if (!isScoringAlertEvent(event)) return;
+      const key = scoringAlertIdentity(event);
       if (!key || state.alertedScoringKeys[key]) return;
       state.alertedScoringKeys[key] = true;
       announced.push(event);
     });
     if (!announced.length) return;
-    // One sound per completed polling pass even if the source publishes a
-    // pending row and a replay verdict together for the same scoring play.
     if (state.soundEnabled) playBoothAlert(announced);
     notifyNullifiedScoringPlays(announced);
   }
@@ -1143,7 +1159,7 @@
         return !!(event && event.kind === 'review');
       });
       const redzoneEvents = uniqueScoringEvents(sourceEvents, function (event) {
-        return !!(event && event.redZone && confirmedNullifiedScoringEvent(event));
+        return !!(event && event.redZone && (confirmedNullifiedScoringEvent(event) || event.isRedZoneTouchdownChallenge));
       });
       const latestNullified = nullified.length ? nullified[nullified.length - 1] : null;
       // Card badges remain outcome-only: a potential or audit record cannot
@@ -1276,15 +1292,15 @@
     state.dayPendingRulings = pendingRulingMap(freshPending);
     state.dayDisappearanceAuditItems = activeDisappearances;
 
-    // This is a live outcome feed, not a historical transcript: a row stays
-    // visible only while the current provider snapshot still calls it
-    // nullified. First paint is silent; later new nullifications are the only
-    // events allowed through alerting.
+    // This is a live scoring feed: first paint primes existing records silently;
+    // later new scoring alert events (potential nullifications, red zone touchdown
+    // challenges, and confirmed nullifications) are announced.
+    const alertableFresh = freshAll.filter(isScoringAlertEvent);
     if (!state.dayFeed.primed) {
       state.dayFeed.primed = true;
-      primeScoringAlerts(freshNullified);
+      primeScoringAlerts(alertableFresh);
     } else {
-      announceNewBoothEvents(freshNullified);
+      announceNewBoothEvents(alertableFresh);
     }
     state.dayFeed.items = freshNullified;
     // Audit items reflect current source irregularities plus a pending record
@@ -1855,7 +1871,7 @@
     if (tab === 'review') return events.filter(function (e) { return e && e.kind === 'review'; });
     if (tab === 'redzone') {
       return uniqueScoringEvents(events, function (e) {
-        return !!(e && e.redZone && confirmedNullifiedScoringEvent(e));
+        return !!(e && e.redZone && (confirmedNullifiedScoringEvent(e) || e.isRedZoneTouchdownChallenge));
       });
     }
     if (tab === 'integrity') {
@@ -2214,8 +2230,9 @@
   function init() {
     // Unlock audio from an explicit user gesture; this is required by browsers
     // and keeps the initial page load silent.
-    document.addEventListener('click', unlockBoothAudio);
-    document.addEventListener('keydown', unlockBoothAudio);
+    ['click', 'touchstart', 'touchend', 'mousedown', 'keydown'].forEach(function (evName) {
+      document.addEventListener(evName, unlockBoothAudio, { passive: true });
+    });
     loadBoothSoundPref();
 
     $('prev-day').addEventListener('click', function () { setDate(addDays(state.date, -1)); });

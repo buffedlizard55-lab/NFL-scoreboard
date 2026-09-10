@@ -804,14 +804,18 @@ async function run() {
   summary.drives.previous.push(disappearingDrive);
   reviewTimer.callback();
   await settle();
-  assert.strictEqual(elements['day-booth'].innerHTML.indexOf('>POTENTIAL<'), -1);
+  const soundAfterPending = audio.oscillatorCount;
+  assert.ok(soundAfterPending > soundAfterVerdict, 'new pending scoring review alerts with sound');
+  assert.strictEqual(notifications.length, 2);
+  assert.ok(notifications[1].options.body.indexOf('potential nullification') !== -1);
+
   summary.drives.previous.splice(summary.drives.previous.indexOf(disappearingDrive), 1);
   reviewTimer.callback();
   await settle();
   assert.strictEqual(elements['day-booth'].innerHTML.indexOf('Pending scoring ruling no longer in source'), -1,
     'the default live feed remains outcome-only even for a source disappearance');
-  assert.strictEqual(audio.oscillatorCount, soundAfterVerdict);
-  assert.strictEqual(notifications.length, 1);
+  assert.strictEqual(audio.oscillatorCount, soundAfterPending);
+  assert.strictEqual(notifications.length, 2);
 
   clickDayTab('integrity');
   const auditHTML = elements['day-booth'].innerHTML;
@@ -822,8 +826,8 @@ async function run() {
     'a disappeared potential is flagged only in the audit view');
   assert.strictEqual(auditHTML.indexOf('TOUCHDOWN NULLIFIED by Penalty'), -1,
     'the audit tab is not another nullification feed');
-  assert.strictEqual(audio.oscillatorCount, soundAfterVerdict);
-  assert.strictEqual(notifications.length, 1);
+  assert.strictEqual(audio.oscillatorCount, soundAfterPending);
+  assert.strictEqual(notifications.length, 2);
 
   clickDayTab('nullified');
   assert.strictEqual(elements['day-booth'].innerHTML.indexOf('>DATA CHECK<'), -1);
@@ -934,6 +938,52 @@ async function run() {
   assert.ok(elements.tabs.innerHTML.indexOf('class="tab active" data-tab="redzone"') !== -1);
   assert.ok(elements['game-content'].innerHTML.indexOf('enforced at LAC 9') !== -1);
 
+  // Test live scoring alerts:
+  // 1. Red zone boundary touchdown challenge triggers sound & desktop notification
+  const countBeforeRzAlert = audio.oscillatorCount;
+  const notificationsBeforeRzAlert = notifications.length;
+  const rzTdChallengeDrive = {
+    id: 'rz-td-challenge-drive',
+    team: { abbreviation: 'LAC', displayName: 'Los Angeles Chargers', logos: [] },
+    plays: [
+      {
+        id: 'rz-td-alert-1', sequenceNumber: '9900100', type: { text: 'Pass Reception' },
+        text: 'Los Angeles challenged whether the runner broke the plane of the goal line for a touchdown.',
+        awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false,
+        period: { number: 1 }, clock: { displayValue: '8:45' },
+        start: { yardsToEndzone: 2, downDistanceText: '1st & Goal at LAC 2' }
+      }
+    ]
+  };
+  secondSummary.drives.previous.push(rzTdChallengeDrive);
+  reviewTimer.callback();
+  await settle();
+  assert.ok(audio.oscillatorCount > countBeforeRzAlert, 'red zone touchdown challenge triggers pleasant audio alert');
+  assert.strictEqual(notifications.length, notificationsBeforeRzAlert + 1, 'red zone touchdown challenge creates desktop notification');
+  assert.ok(notifications[notifications.length - 1].options.body.indexOf('Red zone challenge') !== -1);
+
+  // 2. Unrelated non-scoring red zone review does NOT alert
+  const countBeforePlainReview = audio.oscillatorCount;
+  const notificationsBeforePlainReview = notifications.length;
+  const plainRzReviewDrive = {
+    id: 'plain-rz-drive',
+    team: { abbreviation: 'LAC', displayName: 'Los Angeles Chargers', logos: [] },
+    plays: [
+      {
+        id: 'plain-rz-1', sequenceNumber: '9900200', type: { text: 'Pass Reception' },
+        text: 'Los Angeles challenged the catch ruling at the 14-yard line, and the play was Upheld.',
+        awayScore: 0, homeScore: 0, scoringPlay: false, isPenalty: false,
+        period: { number: 1 }, clock: { displayValue: '8:00' },
+        start: { yardsToEndzone: 14, downDistanceText: '2nd & 6 at LAC 14' }
+      }
+    ]
+  };
+  secondSummary.drives.previous.push(plainRzReviewDrive);
+  reviewTimer.callback();
+  await settle();
+  assert.strictEqual(audio.oscillatorCount, countBeforePlainReview, 'non-scoring red zone review remains silent');
+  assert.strictEqual(notifications.length, notificationsBeforePlainReview, 'non-scoring red zone review creates no notification');
+
   console.log('NFL scoreboard app smoke test');
   console.log('  ✓ all-games live feed contains confirmed scoring nullifications only');
   console.log('  ✓ all-games panel tracks flags, challenges, replay, under-review, red-zone, nullified and data checks in separate tabs');
@@ -945,6 +995,8 @@ async function run() {
   console.log('  ✓ confirmed nullifications alone produce visual/audio/desktop alert paths');
   console.log('  ✓ source irregularities stay in the dedicated all-games and game-level audit views');
   console.log('  ✓ all selected-day games are scanned automatically and route to focused tabs');
+  console.log('  ✓ pleasant chime alert sound triggers on potential scoring nullifications and red zone touchdown challenges');
+  console.log('  ✓ non-scoring red zone reviews and regular drive penalties remain strictly silent');
 
 }
 

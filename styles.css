@@ -192,6 +192,7 @@ main {
  * an alert or a final officiating result. */
 .badge.watch-status { border: 1px solid transparent; }
 .badge.pending-score { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.badge.awarded-score { background: #dcfce7; color: #166534; border-color: #86efac; }
 .badge.retained-score { background: #e9f6ee; color: #166534; border-color: #bbf7d0; }
 .badge.integrity { background: #eef1f5; color: #475569; border-color: #cbd5e1; }
 .badge.source-lane { background: #e7eefe; color: #1e40af; border-color: #bfdbfe; font-size: 10px; }
